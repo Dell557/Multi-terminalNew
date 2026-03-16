@@ -2,7 +2,7 @@
 import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { Search, ArrowLeft, CaretBottom, View, WarningFilled, RefreshRight } from '@element-plus/icons-vue'
-import { getRecord, searchRecords, updateRecord, getFriendlyError, isConfigured } from '@/utils/feishu'
+import { getRecord, searchRecords, updateRecord, getFriendlyError, isConfigured, isBitableConfigured, getBitableConfig } from '@/utils/feishu'
 import { normalizeToArray, getText, getCoverUrl, extractUrl, DEFAULT_COVER, mapKeysToEnglish } from '@/utils/data-mapping'
 import { scrollToTop, getHeroImageSrc, openInNewTab, useDarkMode } from '@/utils/ui'
 import FixedActionPanel from '@/components/FixedActionPanel.vue'
@@ -16,6 +16,7 @@ import outcomeImg5 from '@/images/detail/textDetail/image 21.png'
 import outcomeDoc1 from '@/images/detail/qhua2.jpg'
 import outcomeDoc2 from '@/images/detail/leffer.png'
 import outcomeDoc3 from '@/images/detail/com.jpg'
+import publicImg from '@/images/public.jpg'
 import xiangmuxinxiIcon from '@/images/icon_ewd2dbl138v/xiangmuxinxi.png'
 import daoshijieshaoIcon from '@/images/icon_ewd2dbl138v/daoshijieshao.png'
 import xiangmushouhuoIcon from '@/images/icon_ewd2dbl138v/xiangmushouhuo.png'
@@ -46,8 +47,7 @@ const isError = ref(false)
 const errorMessage = ref('')
 const errorType = ref('')
 
-const appToken = import.meta.env.VITE_FEISHU_APP_TOKEN || 'HhWdbVvL9atRhzss0Ggc25lDnRx'
-const tableId = import.meta.env.VITE_FEISHU_TABLE_ID || 'tblFZLlvetV0Lpcd'
+const { appToken, tableId } = getBitableConfig()
 
 // 加载数据函数（可重试）
 const loadData = async () => {
@@ -59,6 +59,13 @@ const loadData = async () => {
   if (!isConfigured()) {
     isError.value = true
     errorMessage.value = '未配置飞书 API，请联系管理员配置环境变量'
+    errorType.value = 'config'
+    return
+  }
+
+  if (!isBitableConfigured()) {
+    isError.value = true
+    errorMessage.value = '未配置多维表格，请联系管理员配置环境变量'
     errorType.value = 'config'
     return
   }
@@ -198,7 +205,7 @@ const item = computed(() => {
     const title = getText(combined.project_name_cn || combined.project_name || combined.title_raw)
     const desc = getText(combined.description_cn || combined.description_intro || combined.project_intro || combined.description_raw)
     // 优先使用路由传递过来的 university
-    const university = route.query.university || getText(combined.university || combined.school || combined.college || combined.university_raw)
+    const university = route.query.university || getText(combined.university || combined['导师院校'] || combined.school || combined.college || combined.university_raw)
     const teacher = getText(combined.mentor_name_cn || combined.mentor || combined.teacher)
     // 优先使用路由传递过来的 mentorType (从列表页带过来的正确显示值)，如果不存在则尝试从 fetch 数据中获取
     const mentorType = route.query.mentorType || getText(combined.mentorType || combined.mentor_type_cn || combined.mentor_title || combined.title_job)
@@ -357,6 +364,10 @@ function goBack() {
   router.back()
 }
 
+function goHome() {
+  router.push('/')
+}
+
 function downloadPoster() {
   const src = getHeroImageSrc(item.value, defaultHero)
   openInNewTab(src)
@@ -365,6 +376,12 @@ function downloadPoster() {
 function goToRelated(p) {
   if (!p || !p.id) return
   router.push({ path: `/detail/${p.id}` })
+}
+
+function handleImageError(event) {
+  if (!event || !event.target) return
+  if (event.target.src === publicImg) return
+  event.target.src = publicImg
 }
 </script>
 
@@ -392,7 +409,7 @@ function goToRelated(p) {
     <header v-else-if="!isError" class="main-header">
       <div class="header-content">
         <div class="logo">
-          <img :src="logoImg" class="logo-img" alt="中科探才" />
+          <img :src="logoImg" class="logo-img" alt="中科英才" @click="goHome" />
         </div>
         <div class="search-container">
           <el-input
@@ -445,7 +462,11 @@ function goToRelated(p) {
               :src="item.headImg || item.img || defaultHero"
               fit="cover"
               class="hero-image"
-            />
+            >
+              <template #error>
+                <img :src="publicImg" alt="" class="hero-image" />
+              </template>
+            </el-image>
             <div class="hero-views" v-if="item.views > 0">
               <el-icon><View /></el-icon>
               <span>{{ item.views }}</span>
@@ -722,7 +743,7 @@ function goToRelated(p) {
                     @click="goToRelated(p)"
                   >
                     <div class="side-project-image">
-                      <img :src="p.img" alt="" />
+                      <img :src="p.img" alt="" @error="handleImageError" />
                     </div>
                     <div class="side-project-info">
                       <p class="side-project-title">{{ p.title }}</p>
@@ -801,11 +822,11 @@ function goToRelated(p) {
         <div class="footer-content">
           <div class="footer-brand">
             <div class="footer-logo">
-              <img :src="logoImg" alt="中科探才" />
+              <img :src="logoImg" alt="中科英才" @click="goHome" />
             </div>
-            <span class="footer-title">中科探才</span>
+            <span class="footer-title">中科英才</span>
           </div>
-          <p class="footer-copy">© 2024 中科探才学术平台 版权所有</p>
+          <p class="footer-copy">© 2024 中科英才学术平台 版权所有</p>
         </div>
       </div>
     </footer>
@@ -988,6 +1009,7 @@ function goToRelated(p) {
 .logo {
   display: flex;
   align-items: center;
+  cursor: pointer;
 }
 
 .logo-img {
@@ -2198,6 +2220,7 @@ function goToRelated(p) {
 .footer-logo {
   width: 24px;
   height: 24px;
+  cursor: pointer;
 }
 
 .footer-logo img {

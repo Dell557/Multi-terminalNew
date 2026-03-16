@@ -54,6 +54,18 @@ export const isConfigured = () => {
   return Boolean(APP_ID && APP_SECRET);
 };
 
+export const getBitableConfig = () => {
+  return {
+    appToken: import.meta.env.VITE_FEISHU_APP_TOKEN || '',
+    tableId: import.meta.env.VITE_FEISHU_TABLE_ID || ''
+  };
+};
+
+export const isBitableConfigured = () => {
+  const { appToken, tableId } = getBitableConfig();
+  return Boolean(appToken && tableId);
+};
+
 export const getErrorMessages = () => errorMessages;
 
 /**

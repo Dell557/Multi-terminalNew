@@ -4,8 +4,8 @@ import { createPinia } from 'pinia'
 import App from './App.vue'
 import router from './router'
 import '@/images/iconfon/iconfont.css'
-import ElementPlus from '../node_modules/element-plus/dist/index.full.js'
-import '../node_modules/element-plus/dist/index.css'
+import 'element-plus/dist/index.css'
+import ElementPlus from 'element-plus/dist/index.full.js'
 
 const app = createApp(App)
 

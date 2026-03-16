@@ -1,9 +1,10 @@
 <script setup>
-import zhCn from '../node_modules/element-plus/dist/locale/zh-cn.js'
+import 'element-plus/dist/locale/zh-cn.js'
+const zhCnLocal = globalThis.ElementPlusLocaleZhCn
 </script>
 
 <template>
-  <el-config-provider :locale="zhCn">
+  <el-config-provider :locale="zhCnLocal">
     <div class="pc-adapter">
       <div class="design-root">
 

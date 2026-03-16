@@ -160,6 +160,7 @@ export const fieldMapping = {
   '大学': 'university',
   '学校': 'school',
   '院校': 'college',
+  '导师院校': 'university',
   '导师姓名': 'mentor_name_cn',
   '导师': 'mentor',
   '教师': 'teacher',

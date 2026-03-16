@@ -11,8 +11,9 @@ import loadingImg from '@/images/icon_ewd2dbl138v/jiazaizhong.png'
 import errorImg from '@/images/icon_ewd2dbl138v/jiazaishibai.png'
 import noContentImg from '@/images/icon_ewd2dbl138v/zanwuneirong.png'
 import Fuse from 'fuse.js'
+import publicImg from '@/images/public.jpg'
 import { normalizeToArray, getText, getCoverUrl, extractUrl, DEFAULT_COVER, mapKeysToEnglish, truncate } from '@/utils/data-mapping'
-import { searchRecords, isConfigured, getFriendlyError } from '@/utils/feishu'
+import { searchRecords, isConfigured, isBitableConfigured, getBitableConfig, getFriendlyError } from '@/utils/feishu'
 import { scrollToTop, useDarkMode } from '@/utils/ui'
 import FixedActionPanel from '@/components/FixedActionPanel.vue'
 import { useSubjectFilters } from '@/composables/useFilters'
@@ -282,17 +283,38 @@ const isFavorited = id => favoriteIds.value.has(id)
 
 // 加载数据函数（可重试）
 const loadData = () => {
+  const fallbackCourses =
+    Array.isArray(allCourses.value) && allCourses.value.length
+      ? allCourses.value
+      : mockPhotos
+
   // --- 飞书数据集成 ---
   // 1. 检查配置是否已完成
   if (!isConfigured()) {
     console.warn('⚠️ 飞书 API 未配置：请通过 .env.local 配置 VITE_FEISHU_APP_ID / VITE_FEISHU_APP_SECRET');
     showConfigHint.value = true
-    configHintMessage.value = '未配置飞书数据源：请创建 .env.local 并设置 VITE_FEISHU_APP_ID、VITE_FEISHU_APP_SECRET（可选：VITE_FEISHU_APP_TOKEN、VITE_FEISHU_TABLE_ID），然后重启开发服务器。当前展示为本地示例数据。'
+    configHintMessage.value = '未配置飞书数据源：请创建 .env.local 并设置 VITE_FEISHU_APP_ID、VITE_FEISHU_APP_SECRET、VITE_FEISHU_APP_TOKEN、VITE_FEISHU_TABLE_ID，然后重启开发服务器。当前展示为本地示例数据。'
+    if (!Array.isArray(allCourses.value) || allCourses.value.length === 0) {
+      allCourses.value = fallbackCourses
+    }
     isLoading.value = false
     isError.value = false
     errorMessage.value = ''
     errorType.value = ''
     return;
+  }
+
+  if (!isBitableConfigured()) {
+    showConfigHint.value = true
+    configHintMessage.value = '未配置多维表格：请设置 VITE_FEISHU_APP_TOKEN、VITE_FEISHU_TABLE_ID，然后重启开发服务器。当前展示为本地示例数据。'
+    if (!Array.isArray(allCourses.value) || allCourses.value.length === 0) {
+      allCourses.value = fallbackCourses
+    }
+    isLoading.value = false
+    isError.value = false
+    errorMessage.value = ''
+    errorType.value = ''
+    return
   }
 
   showConfigHint.value = false
@@ -303,8 +325,7 @@ const loadData = () => {
   errorType.value = ''
 
   // 2. 配置您的多维表格信息
-  const appToken = import.meta.env.VITE_FEISHU_APP_TOKEN || 'HhWdbVvL9atRhzss0Ggc25lDnRx';
-  const tableId = import.meta.env.VITE_FEISHU_TABLE_ID || 'tblFZLlvetV0Lpcd';
+  const { appToken, tableId } = getBitableConfig()
 
   console.log('🚀 首页发起飞书 API 请求...');
 
@@ -324,6 +345,13 @@ const loadData = () => {
       // B. 处理课程列表数据
       const courses = [];
       const items = (res && res.items) || [];
+
+      if (!items.length) {
+        showConfigHint.value = true
+        configHintMessage.value = '飞书表暂无数据，已展示本地示例数据。'
+        allCourses.value = fallbackCourses
+        return
+      }
 
       items.forEach((record, index) => {
         const f = record.fields;
@@ -363,7 +391,7 @@ const loadData = () => {
           posterImg: posterImg, // 专门存放"海报地址测试"提取出的 URL
           primary: primaryValue,
           secondary: secondaryValue,
-          university: getText(f['大学'] || f['学校'] || f['院校'] || f['university'] || f['school'] || f['导师所在/毕业院校'] || f['university_raw']) || '未知大学',
+          university: getText(f['导师院校'] || f['大学'] || f['学校'] || f['院校'] || f['university'] || f['school'] || f['导师所在/毕业院校'] || f['university_raw']) || '未知大学',
           teacher: getText(f['导师姓名'] || f['导师'] || f['教师'] || f['mentor_name_cn'] || f['mentor'] || f['teacher']) || '未知导师',
           mentorType: getText(englishFields['mentor_type_cn'] || f['导师类型'] || f['导师职称'] || f['职称'] || f['mentor_title'] || f['title_job']) || '导师',
           suit: getText(f['适合专业'] || f['专业要求'] || f['suitable_major'] || f['major_requirement']) || ''
@@ -389,11 +417,14 @@ const loadData = () => {
     })
     .catch(err => {
       console.error('❌ 首页飞书数据获取失败:', err);
-      isError.value = true
       // 使用友好的错误消息
       const friendlyErr = getFriendlyError(err)
-      errorMessage.value = friendlyErr.friendlyMessage
-      errorType.value = friendlyErr.type
+      showConfigHint.value = true
+      configHintMessage.value = `飞书数据获取失败（${friendlyErr.friendlyMessage}），已展示本地示例数据。`
+      allCourses.value = fallbackCourses
+      isError.value = false
+      errorMessage.value = ''
+      errorType.value = ''
     })
     .finally(() => {
       isLoading.value = false
@@ -475,6 +506,10 @@ function onPhotoClick(item) {
     })
   }
 }
+
+function goHome() {
+  router.push('/')
+}
 </script>
 
 <template>
@@ -482,7 +517,7 @@ function onPhotoClick(item) {
     <header class="main-header">
       <div class="header-content">
         <div class="logo">
-          <img :src="logoImg" class="logo-img" alt="Logo" />
+          <img :src="logoImg" class="logo-img" alt="中科英才" @click="goHome" />
         </div>
         <div class="search-container">
           <el-input 
@@ -634,13 +669,13 @@ function onPhotoClick(item) {
 			<div class="card-cover">
 			  <!-- 优先显示 poster_image_test，其次是通用 img 字段 -->
 			  <el-image 
-			    :src="getCoverUrl(item) || DEFAULT_COVER" 
+			    :src="getCoverUrl(item) || publicImg" 
 			    fit="cover" 
 			    referrer-policy="no-referrer"
 			    lazy
 			  >
 			    <template #error>
-			      <img :src="DEFAULT_COVER" style="width:100%;height:100%;object-fit:cover;" />
+			      <img :src="publicImg" style="width:100%;height:100%;object-fit:cover;" />
 			    </template>
 			  </el-image>
           <div class="cover-title">{{ item.title }}</div>
@@ -736,6 +771,7 @@ function onPhotoClick(item) {
 .logo {
   display: flex;
   align-items: center;
+  cursor: pointer;
 }
 
 .logo-img {
@@ -922,8 +958,8 @@ function onPhotoClick(item) {
 .filter-btn {
   padding: 6px 16px;
   border-radius: 999px;
-  border: 1px solid transparent;
-  background: transparent;
+  border: 1px solid #e5e5e5;
+  background: #fff;
   color: #333;
   font-size: 14px;
   cursor: pointer;
@@ -931,30 +967,15 @@ function onPhotoClick(item) {
 }
 
 .filter-btn:hover {
+  border-color: #ff6b00;
   color: #ff6b00;
 }
 
 .filter-btn.active {
-  background: #fff0e6;
-  color: #ff6b00;
-  font-weight: 500;
-}
-
-/* Secondary Filter Styles */
-.secondary-row .filter-btn {
-  border: 1px solid #e5e5e5;
-  background: #fff;
-}
-
-.secondary-row .filter-btn:hover {
-  border-color: #ff6b00;
-  color: #ff6b00;
-}
-
-.secondary-row .filter-btn.active {
   background: #ff6b00;
   color: #fff;
   border-color: #ff6b00;
+  font-weight: 500;
 }
 
 .secondary-options {

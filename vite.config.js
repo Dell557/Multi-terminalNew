@@ -12,6 +12,7 @@ export default defineConfig({
   plugins: [
     vue(),
     vueDevTools(),
+    // 关闭基于 Element Plus 的自动按需导入，使用 full build 全局注册，避免 'element-plus/es' 路径缺失
     AutoImport({}),
     Components({}),
     viteCompression({
