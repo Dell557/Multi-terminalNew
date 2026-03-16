@@ -1,13 +1,16 @@
 <script setup>
+import zhCn from '../node_modules/element-plus/dist/locale/zh-cn.js'
 </script>
 
 <template>
-  <div class="pc-adapter">
-    <div class="design-root">
+  <el-config-provider :locale="zhCn">
+    <div class="pc-adapter">
+      <div class="design-root">
 
-      <router-view />
+        <router-view />
+      </div>
     </div>
-  </div>
+  </el-config-provider>
 </template>
 
 <style scoped>

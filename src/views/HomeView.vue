@@ -1,19 +1,39 @@
 <script setup>
-import { ref, computed, watch, onMounted } from 'vue'
+import { ref, computed, watch, onMounted, onUnmounted, shallowRef } from 'vue'
 import { useRouter } from 'vue-router'
-import { Search, User, School, Grid, List, ArrowDown, StarFilled, Close, RefreshRight } from '@element-plus/icons-vue'
+import { Search, User, School, Grid, List, ArrowDown, StarFilled, Close, RefreshRight, WarningFilled } from '@element-plus/icons-vue'
 import logoImg from '@/images/logo.jpg'
+import qiansemoshiIcon from '@/images/icon_ewd2dbl138v/qiansemoshi.png'
+import shensemoshiIcon from '@/images/icon_ewd2dbl138v/shensemoshi.png'
+import fanhuidingbuIcon from '@/images/icon_ewd2dbl138v/fanhuidingbu.png'
+import emptyImg from '@/images/icon_ewd2dbl138v/weisousuodao.png'
+import loadingImg from '@/images/icon_ewd2dbl138v/jiazaizhong.png'
+import errorImg from '@/images/icon_ewd2dbl138v/jiazaishibai.png'
+import noContentImg from '@/images/icon_ewd2dbl138v/zanwuneirong.png'
+import Fuse from 'fuse.js'
 import { normalizeToArray, getText, getCoverUrl, extractUrl, DEFAULT_COVER, mapKeysToEnglish, truncate } from '@/utils/data-mapping'
-import { searchRecords, isConfigured } from '@/utils/feishu'
+import { searchRecords, isConfigured, getFriendlyError } from '@/utils/feishu'
+import { scrollToTop, useDarkMode } from '@/utils/ui'
+import FixedActionPanel from '@/components/FixedActionPanel.vue'
+import { useSubjectFilters } from '@/composables/useFilters'
 
-const selectedPrimary = ref('')
-const selectedSecondary = ref('')
-const selectedMentorType = ref('全部')
+let selectedPrimary, selectedSecondary, selectedMentorType
 const searchText = ref('')
+const isLoading = ref(false)
+const isError = ref(false)
+const errorMessage = ref('')
+const errorType = ref('')
+const showConfigHint = ref(false)
+const configHintMessage = ref('')
+const searchSuggestions = ref([])
+const showSuggestions = ref(false)
 const currentPage = ref(1)
 const pageSize = ref(12)
 const isGridView = ref(true)
 const favoriteIds = ref(new Set())
+
+const { isDarkMode, toggleDarkMode } = useDarkMode()
+
 
 const router = useRouter()
 
@@ -34,23 +54,29 @@ const DEFAULT_SUBJECTS = [
 
 const subjectData = ref(DEFAULT_SUBJECTS)
 
-const secondaryToPrimaryMap = computed(() => {
-  const m = new Map()
-  subjectData.value.forEach(({ name, children }) => { 
-    children.forEach(c => m.set(c, name))
-  })
-  return m
-})
+const {
+  selectedPrimary: sp,
+  selectedSecondary: ss,
+  selectedMentorType: smt,
+  mentorTypes,
+  secondaryToPrimaryMap,
+  allSecondary,
+  currentSecondaryList,
+  SECONDARY_LIMIT,
+  expandedSecondary,
+  onPrimaryAllClick,
+  onPrimaryClick,
+  onSecondaryAllClick,
+  onSecondaryClick,
+  toggleSecondaryExpand,
+  onMentorTypeClick,
+  activeFilters,
+  removeFilter
+} = useSubjectFilters(subjectData)
+selectedPrimary = sp
+selectedSecondary = ss
+selectedMentorType = smt
 
-const allSecondary = computed(() => Array.from(new Set(subjectData.value.flatMap(item => item.children))))
-
-const mentorTypes = ['全部', '教授', '博士']
-
-const currentSecondaryList = computed(() => {
-  if (!selectedPrimary.value) return allSecondary.value
-  const target = subjectData.value.find(item => item.name === selectedPrimary.value)
-  return target ? target.children : []
-})
 
 const mockPhotos = [  
   {
@@ -153,7 +179,7 @@ const mockPhotos = [
     id: 9 + i,
     title: `示例课程标题 ${9 + i}：探索未知领域的学术前沿`,
     desc: '本课程旨在引导学生深入理解该学科的核心理论与研究方法，通过案例分析与实践操作提升科研能力。',
-    img: `https://images.unsplash.com/photo-${1500000000000 + i}?q=80&w=1600&auto=format&fit=crop`,
+    img: `https://picsum.photos/seed/course_${9 + i}/1200/800`,
     primary: DEFAULT_SUBJECTS[i % DEFAULT_SUBJECTS.length].name,
     secondary: DEFAULT_SUBJECTS[i % DEFAULT_SUBJECTS.length].children[0],
     university: '某某大学',
@@ -174,25 +200,67 @@ watch(searchText, (val) => {
   }, 200)
 })
 
-const filteredPhotos = computed(() => {
+const fuseOptions = {
+  keys: [
+    { name: 'title', weight: 0.4 },
+    { name: 'desc', weight: 0.2 },
+    { name: 'teacher', weight: 0.2 },
+    { name: 'university', weight: 0.1 },
+    { name: 'primary', weight: 0.05 },
+    { name: 'secondary', weight: 0.05 }
+  ],
+  threshold: 0.4, // 0.0 requires a perfect match, 1.0 matches anything
+  includeScore: true
+}
+
+const baseFilteredCourses = computed(() => {
   let result = allCourses.value
   if (selectedPrimary.value) result = result.filter(p => p.primary === selectedPrimary.value)
   if (selectedSecondary.value) result = result.filter(p => p.secondary === selectedSecondary.value)
   if (selectedMentorType.value !== '全部') result = result.filter(p => p.mentorType === selectedMentorType.value)
-  if (debouncedSearchText.value) {
-    const key = debouncedSearchText.value.toLowerCase().trim()
-    if (key) {
-      result = result.filter(p => 
-        (p.title && p.title.toLowerCase().includes(key)) || 
-        (p.desc && p.desc.toLowerCase().includes(key)) ||
-        (p.teacher && p.teacher.toLowerCase().includes(key)) ||
-        (p.university && p.university.toLowerCase().includes(key)) ||
-        (p.primary && p.primary.toLowerCase().includes(key)) ||
-        (p.secondary && p.secondary.toLowerCase().includes(key))
-      )
-    }
+  return result
+})
+
+const fuseIndex = shallowRef(null)
+watch(baseFilteredCourses, (list) => {
+  fuseIndex.value = list && list.length ? new Fuse(list, fuseOptions) : null
+}, { immediate: true })
+
+const filteredPhotos = computed(() => {
+  let result = baseFilteredCourses.value
+  const key = debouncedSearchText.value ? debouncedSearchText.value.trim() : ''
+  if (key && fuseIndex.value) {
+    const searchResult = fuseIndex.value.search(key)
+    result = searchResult.map(item => item.item)
   }
   return result
+})
+
+let ignoreSearchWatch = false
+
+watch(searchText, (val) => {
+  if (ignoreSearchWatch) {
+    ignoreSearchWatch = false
+    return
+  }
+  if (!val || !val.trim()) {
+    searchSuggestions.value = []
+    showSuggestions.value = false
+    return
+  }
+  
+  const key = val.trim()
+  if (!fuseIndex.value) {
+    searchSuggestions.value = []
+    showSuggestions.value = false
+    return
+  }
+  // Search in baseFilteredCourses to keep suggestions context-aware
+  const results = fuseIndex.value.search(key)
+  
+  // Take top 6 suggestions
+  searchSuggestions.value = results.slice(0, 6).map(r => r.item)
+  showSuggestions.value = searchSuggestions.value.length > 0
 })
 
 const paginatedPhotos = computed(() => {
@@ -212,20 +280,34 @@ const toggleFavorite = id => {
 }
 const isFavorited = id => favoriteIds.value.has(id)
 
-onMounted(() => {
+// 加载数据函数（可重试）
+const loadData = () => {
   // --- 飞书数据集成 ---
   // 1. 检查配置是否已完成
   if (!isConfigured()) {
-    console.warn('⚠️ 飞书 API 未配置: 请在 src/utils/feishu.js 中填入 APP_SECRET 以启用真实数据。');
+    console.warn('⚠️ 飞书 API 未配置：请通过 .env.local 配置 VITE_FEISHU_APP_ID / VITE_FEISHU_APP_SECRET');
+    showConfigHint.value = true
+    configHintMessage.value = '未配置飞书数据源：请创建 .env.local 并设置 VITE_FEISHU_APP_ID、VITE_FEISHU_APP_SECRET（可选：VITE_FEISHU_APP_TOKEN、VITE_FEISHU_TABLE_ID），然后重启开发服务器。当前展示为本地示例数据。'
+    isLoading.value = false
+    isError.value = false
+    errorMessage.value = ''
+    errorType.value = ''
     return;
   }
 
+  showConfigHint.value = false
+  configHintMessage.value = ''
+  isLoading.value = true
+  isError.value = false
+  errorMessage.value = ''
+  errorType.value = ''
+
   // 2. 配置您的多维表格信息
-  const appToken = 'HhWdbVvL9atRhzss0Ggc25lDnRx'; // 您的多维表格 app_token
-  const tableId = 'tblFZLlvetV0Lpcd'; // 您的数据表 table_id (已修正为核心课题表)
+  const appToken = import.meta.env.VITE_FEISHU_APP_TOKEN || 'HhWdbVvL9atRhzss0Ggc25lDnRx';
+  const tableId = import.meta.env.VITE_FEISHU_TABLE_ID || 'tblFZLlvetV0Lpcd';
 
   console.log('🚀 首页发起飞书 API 请求...');
-  
+
   // 3. 发起请求
   // 先不限定 field_names，避免因为字段名不完全一致导致 FieldNameNotFound
   // 飞书会返回该表的所有字段，我们只读取自己关心的字段，缺失时用默认值兜底
@@ -235,20 +317,20 @@ onMounted(() => {
       if (res.items && res.items.length > 0) {
         console.log('🔍 第一条数据的原始字段:', res.items[0].fields);
       }
-      
+
       // A. 处理一级学科数据
       const map = new Map();
-      
+
       // B. 处理课程列表数据
       const courses = [];
       const items = (res && res.items) || [];
 
       items.forEach((record, index) => {
         const f = record.fields;
-        
+
         // 生成英文键的原始数据副本
         const englishFields = mapKeysToEnglish(f);
-        
+
         // 这里的 f 和 englishFields 混合在一起传给 getCoverUrl，确保能找到所有可能的字段
         let imgUrl = getCoverUrl({ ...f, ...englishFields })
 
@@ -277,8 +359,8 @@ onMounted(() => {
           title: getText(f['教授课题名称'] || f['课题名称'] || f['项目名称'] || f['标题']) || '未命名课题',
           desc: getText(f['课题描述'] || f['课题简介'] || f['项目简介'] || f['描述']) || '暂无简介',
           img: imgUrl,
-          headImg: headImg, // 专门存放“头图地址测试”提取出的 URL
-          posterImg: posterImg, // 专门存放“海报地址测试”提取出的 URL
+          headImg: headImg, // 专门存放"头图地址测试"提取出的 URL
+          posterImg: posterImg, // 专门存放"海报地址测试"提取出的 URL
           primary: primaryValue,
           secondary: secondaryValue,
           university: getText(f['大学'] || f['学校'] || f['院校'] || f['university'] || f['school'] || f['导师所在/毕业院校'] || f['university_raw']) || '未知大学',
@@ -307,7 +389,32 @@ onMounted(() => {
     })
     .catch(err => {
       console.error('❌ 首页飞书数据获取失败:', err);
+      isError.value = true
+      // 使用友好的错误消息
+      const friendlyErr = getFriendlyError(err)
+      errorMessage.value = friendlyErr.friendlyMessage
+      errorType.value = friendlyErr.type
+    })
+    .finally(() => {
+      isLoading.value = false
     });
+}
+
+// 重试加载
+const handleRetry = () => {
+  loadData()
+}
+
+onMounted(() => {
+  loadData()
+})
+
+// 清理定时器避免内存泄漏
+onUnmounted(() => {
+  if (searchDebounceTimer) {
+    clearTimeout(searchDebounceTimer)
+    searchDebounceTimer = null
+  }
 })
 
 onMounted(() => {
@@ -327,35 +434,7 @@ watch(favoriteIds, (set) => {
   } catch {}
 })
 
-const activeFilters = computed(() => {
-	const filters = []
-	if (selectedPrimary.value || selectedSecondary.value) {
-		let primaryLabel = selectedPrimary.value
-    if (!primaryLabel && selectedSecondary.value) {
-      const map = secondaryToPrimaryMap.value
-      const match = map && map.get ? map.get(selectedSecondary.value) : null
-      if (match) primaryLabel = match
-    }
-		let label = ''
-		if (primaryLabel && selectedSecondary.value) label = `${primaryLabel}-${selectedSecondary.value}`
-		else if (primaryLabel) label = primaryLabel
-		else if (selectedSecondary.value) label = selectedSecondary.value
-		filters.push({ type: 'subject', label, value: label })
-	}
-	if (selectedMentorType.value !== '全部') {
-		filters.push({ type: 'mentor', label: selectedMentorType.value, value: selectedMentorType.value })
-	}
-	return filters
-})
-
-const removeFilter = (filter) => {
-  if (filter.type === 'subject') {
-    selectedPrimary.value = ''
-    selectedSecondary.value = ''
-  } else if (filter.type === 'mentor') {
-    selectedMentorType.value = '全部'
-  }
-}
+ 
 
 const resetAllFilters = () => {
   selectedPrimary.value = ''
@@ -364,35 +443,34 @@ const resetAllFilters = () => {
   searchText.value = ''
 }
 
-function onPrimaryAllClick() {
-  selectedPrimary.value = ''
-  selectedSecondary.value = ''
-}
-function onPrimaryClick(name) {
-  selectedPrimary.value = name
-  selectedSecondary.value = ''
-}
-function onSecondaryAllClick() {
-  selectedSecondary.value = ''
-}
-function onSecondaryClick(name) {
-  selectedSecondary.value = name
-}
-function onMentorTypeClick(type) {
-  selectedMentorType.value = type
-}
+ 
 function performSearch() {
   if (searchDebounceTimer) clearTimeout(searchDebounceTimer)
   debouncedSearchText.value = searchText.value
+  showSuggestions.value = false // Hide suggestions on explicit search
   window.scrollTo({ top: 0, behavior: 'smooth' })
 }
+
+function selectSuggestion(item) {
+  if (searchText.value !== item.title) {
+    ignoreSearchWatch = true
+    searchText.value = item.title
+  }
+  performSearch()
+}
+
 function onPhotoClick(item) {
   if (item && item.id) {
     router.push({
       path: `/detail/${item.id}`,
       query: {
+        title: item.title,
+        desc: item.desc,
+        primary: item.primary,
+        secondary: item.secondary,
         mentorType: item.mentorType,
-        university: item.university
+        university: item.university,
+        img: item.img
       }
     })
   }
@@ -400,7 +478,7 @@ function onPhotoClick(item) {
 </script>
 
 <template>
-  <div class="page-wrapper">
+  <div class="page-wrapper" :class="{ 'is-dark': isDarkMode }">
     <header class="main-header">
       <div class="header-content">
         <div class="logo">
@@ -412,6 +490,8 @@ function onPhotoClick(item) {
             placeholder="搜索感兴趣的课题方向、导师"
             class="header-search-input"
             @keyup.enter="performSearch"
+            @focus="showSuggestions = !!searchText && searchSuggestions.length > 0"
+            @blur="setTimeout(() => showSuggestions = false, 200)"
           >
             <template #prefix>
               <el-icon><Search /></el-icon>
@@ -427,6 +507,24 @@ function onPhotoClick(item) {
               </div>
             </template>
           </el-input>
+          
+          <Transition name="suggestion-fade">
+            <div class="search-suggestions" v-if="showSuggestions && searchSuggestions.length > 0">
+              <div 
+                class="suggestion-item" 
+                v-for="item in searchSuggestions" 
+                :key="item.id"
+                @click="selectSuggestion(item)"
+              >
+                <div class="suggestion-title">{{ item.title }}</div>
+                <div class="suggestion-meta">
+                  <span>{{ item.university }}</span>
+                  <span class="separator">|</span>
+                  <span>{{ item.teacher }}</span>
+                </div>
+              </div>
+            </div>
+          </Transition>
         </div>
         <div class="auth-buttons">
           <el-button type="primary" class="login-btn" round>登录/注册</el-button>
@@ -439,18 +537,18 @@ function onPhotoClick(item) {
         <div class="filter-row">
           <span class="label">一级学科</span>
           <div class="options">
-            <button class="filter-btn primary-all" :class="{ active: !selectedPrimary }" @click="onPrimaryAllClick">全部</button>
+            <button class="filter-btn primary-all all-btn" :class="{ active: !selectedPrimary }" @click="onPrimaryAllClick">全部</button>
             <button v-for="sub in subjectData" :key="sub.name" class="filter-btn" :class="{ active: selectedPrimary === sub.name }" @click="onPrimaryClick(sub.name)">{{ sub.name }}</button>
           </div>
         </div>
 
         <div class="filter-row secondary-row">
           <span class="label">二级学科</span>
-          <div class="options">
-            <button class="filter-btn secondary-all" :class="{ active: !selectedSecondary }" @click="onSecondaryAllClick">全部</button>
+          <div class="options secondary-options" :class="{ expanded: expandedSecondary }">
+            <button class="filter-btn secondary-all all-btn" :class="{ active: !selectedSecondary }" @click="onSecondaryAllClick">全部</button>
             <button v-for="item in currentSecondaryList" :key="item" class="filter-btn" :class="{ active: selectedSecondary === item }" @click="onSecondaryClick(item)">{{ item }}</button>
           </div>
-          <div class="expand-more" v-if="currentSecondaryList.length > 10">
+          <div class="expand-more" :class="{ active: expandedSecondary }" v-if="currentSecondaryList.length > SECONDARY_LIMIT" @click="toggleSecondaryExpand">
             <el-icon><ArrowDown /></el-icon>
           </div>
         </div>
@@ -458,7 +556,7 @@ function onPhotoClick(item) {
         <div class="filter-row">
           <span class="label">导师类型</span>
           <div class="options">
-            <button v-for="type in mentorTypes" :key="type" class="filter-btn" :class="{ active: selectedMentorType === type }" @click="onMentorTypeClick(type)">{{ type }}</button>
+            <button v-for="type in mentorTypes" :key="type" class="filter-btn" :class="{ active: selectedMentorType === type, 'all-btn': type === '全部' }" @click="onMentorTypeClick(type)">{{ type }}</button>
           </div>
         </div>
 
@@ -491,7 +589,42 @@ function onPhotoClick(item) {
           </div>
         </div>
 
+      <div v-if="showConfigHint" class="config-hint">
+        <el-icon><WarningFilled /></el-icon>
+        <span>{{ configHintMessage }}</span>
+      </div>
+
+        <div v-if="isLoading" class="loading-state">
+          <img :src="loadingImg" class="loading-img" alt="正在加载中..." />
+          <p class="loading-text">正在加载中...</p>
+        </div>
+
+        <div v-else-if="isError" class="error-state">
+          <img :src="errorImg" class="error-img" alt="加载失败~" />
+          <p class="error-text">加载失败~</p>
+          <div class="error-message" v-if="errorMessage">
+            <el-icon><WarningFilled /></el-icon>
+            <span>{{ errorMessage }}</span>
+          </div>
+          <el-button type="primary" class="retry-btn" @click="handleRetry">
+            <el-icon><RefreshRight /></el-icon>
+            重试
+          </el-button>
+        </div>
+
+        <div v-else-if="filteredPhotos.length === 0" class="empty-state">
+          <template v-if="debouncedSearchText">
+            <img :src="emptyImg" class="empty-img" alt="暂未搜索到相关课题内容" />
+            <p class="empty-text">暂未搜索到相关课题内容</p>
+          </template>
+          <template v-else>
+            <img :src="noContentImg" class="empty-img" alt="空空如也～" />
+            <p class="empty-text">空空如也～</p>
+          </template>
+        </div>
+
 		<TransitionGroup
+		  v-else
 		  name="list-fade"
 		  tag="div"
 		  class="course-grid"
@@ -504,12 +637,14 @@ function onPhotoClick(item) {
 			    :src="getCoverUrl(item) || DEFAULT_COVER" 
 			    fit="cover" 
 			    referrer-policy="no-referrer"
+			    lazy
 			  >
 			    <template #error>
 			      <img :src="DEFAULT_COVER" style="width:100%;height:100%;object-fit:cover;" />
 			    </template>
 			  </el-image>
-			  <div class="mentor-badge" 
+          <div class="cover-title">{{ item.title }}</div>
+          <div class="mentor-badge" 
              :class="item.mentorType && item.mentorType.includes('教授') ? 'badge-prof' : 'badge-phd'"
              @click.stop="onMentorTypeClick(item.mentorType)">
           {{ item.mentorType }}
@@ -541,11 +676,22 @@ function onPhotoClick(item) {
 		  </div>
 		</TransitionGroup>
 
-        <div class="pagination-wrapper">
+        <div class="pagination-wrapper" v-if="!isLoading && !isError && filteredPhotos.length > 0">
           <el-pagination background layout="prev, pager, next, jumper" v-model:current-page="currentPage" :page-size="pageSize" :total="filteredPhotos.length" />
         </div>
       </div>
     </div>
+
+    <FixedActionPanel
+      :isDarkMode="isDarkMode"
+      :qiansemoshiIcon="qiansemoshiIcon"
+      :shensemoshiIcon="shensemoshiIcon"
+      :fanhuidingbuIcon="fanhuidingbuIcon"
+      :showDownload="false"
+      :top="500"
+      @toggle-dark="toggleDarkMode"
+      @scroll-top="scrollToTop"
+    />
   </div>
 </template>
 
@@ -602,6 +748,74 @@ function onPhotoClick(item) {
   flex: 1;
   max-width: 600px;
   margin: 0 40px;
+  position: relative;
+}
+
+.header-search-input {
+  width: 100%;
+}
+
+.search-suggestions {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  width: 100%;
+  background: #fff;
+  border-radius: 8px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+  margin-top: 8px;
+  z-index: 1000;
+  overflow: hidden;
+  border: 1px solid #ebeef5;
+  max-height: 400px;
+  overflow-y: auto;
+}
+
+.suggestion-item {
+  padding: 10px 16px;
+  cursor: pointer;
+  transition: background-color 0.2s;
+  border-bottom: 1px solid #f0f2f5;
+}
+
+.suggestion-item:last-child {
+  border-bottom: none;
+}
+
+.suggestion-item:hover {
+  background-color: #f5f7fa;
+}
+
+.suggestion-title {
+  font-size: 14px;
+  color: #303133;
+  margin-bottom: 4px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.suggestion-meta {
+  font-size: 12px;
+  color: #909399;
+  display: flex;
+  align-items: center;
+}
+
+.suggestion-meta .separator {
+  margin: 0 8px;
+  color: #dcdfe6;
+}
+
+.suggestion-fade-enter-active,
+.suggestion-fade-leave-active {
+  transition: opacity 0.2s ease, transform 0.2s ease;
+}
+
+.suggestion-fade-enter-from,
+.suggestion-fade-leave-to {
+  opacity: 0;
+  transform: translateY(-10px);
 }
 
 .header-search-input :deep(.el-input__wrapper) {
@@ -609,7 +823,8 @@ function onPhotoClick(item) {
   border: 1px solid #ff6b00;
   background-color: #fff;
   box-shadow: none;
-  padding: 0 0 0 20px;
+  padding: 0 0 0 20px; /* Left padding for text */
+  overflow: hidden; /* Ensure child elements don't overflow rounded corners */
 }
 
 .header-search-input :deep(.el-input__inner) {
@@ -620,11 +835,12 @@ function onPhotoClick(item) {
 
 .header-search-input :deep(.el-input__suffix) {
   padding: 0;
+  right: 0; /* Force suffix to the right edge if absolutely positioned */
 }
 
 .header-search-input :deep(.el-input__suffix-inner) {
   display: flex;
-  align-items: stretch;
+  align-items: center;
   height: 100%;
 }
 
@@ -653,12 +869,16 @@ function onPhotoClick(item) {
 
 .header-search-btn {
   height: 100%;
-  border-radius: 0 999px 999px 0 !important;
+  border-radius: 0 !important; /* Let the wrapper clip the corners */
   margin: 0 !important;
   border: none !important;
   background-color: #ff6b00 !important;
   color: white !important;
   padding: 0 24px !important;
+  font-size: 16px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background-color 0.2s;
 }
 
 .header-search-btn:hover {
@@ -737,10 +957,42 @@ function onPhotoClick(item) {
   border-color: #ff6b00;
 }
 
+.secondary-options {
+  max-height: 40px;
+  overflow: hidden;
+  transition: max-height 0.4s ease-in-out;
+}
+
+.secondary-options.expanded {
+  max-height: 2000px;
+}
+
+/* 统一三个“全部”按钮激活样式为橙色填充 */
+.filter-btn.all-btn.active {
+  background: #ff6b00;
+  color: #fff;
+  border-color: #ff6b00;
+}
+
 .expand-more {
   margin-left: auto;
   cursor: pointer;
-  color: #999;
+  color: #ff6b00;
+  width: 28px;
+  height: 28px;
+  border: 1px solid #ff6b00;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.expand-more .el-icon {
+  transition: transform 0.2s ease;
+}
+
+.expand-more.active .el-icon {
+  transform: rotate(180deg);
 }
 
 /* Content Section */
@@ -1236,6 +1488,149 @@ function onPhotoClick(item) {
   background: #fff1f0;
 }
 
+.cover-title {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  padding: 12px 60px 12px 12px;
+  color: #fff;
+  font-size: 15px;
+  font-weight: 600;
+  line-height: 1.4;
+  background: linear-gradient(to bottom, rgba(0,0,0,0.6) 0%, rgba(0,0,0,0) 100%);
+  z-index: 1;
+  pointer-events: none;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  text-shadow: 0 1px 2px rgba(0,0,0,0.3);
+}
+
+.fixed-action-panel {
+  position: fixed;
+  right: 24px;
+  top: 500px;
+  background: #fff;
+  border-radius: 41px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+  padding: 16px 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+  z-index: 1000;
+}
+
+.action-button {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  cursor: pointer;
+  color: #333;
+}
+
+.action-icon {
+  width: 24px;
+  height: 24px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.action-icon img {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+
+.action-text {
+  font-size: 12px;
+  line-height: 1;
+}
+
+.empty-state,
+.loading-state,
+.error-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 60px 0;
+  min-height: 400px;
+}
+
+.empty-img,
+.loading-img,
+.error-img {
+  width: 160px;
+  height: auto;
+  margin-bottom: 16px;
+  opacity: 0.9;
+}
+
+.empty-text,
+.loading-text,
+.error-text {
+  color: #909399;
+  font-size: 14px;
+}
+
+.error-message {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 12px;
+  padding: 12px 16px;
+  background: #fff1f0;
+  border-radius: 8px;
+  color: #ff4d4f;
+  font-size: 14px;
+  max-width: 400px;
+  text-align: center;
+}
+
+.error-message .el-icon {
+  font-size: 16px;
+  flex-shrink: 0;
+}
+
+.config-hint {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  margin: 16px auto 0;
+  padding: 12px 16px;
+  background: #e6f4ff;
+  border-radius: 8px;
+  color: #1677ff;
+  font-size: 14px;
+  max-width: 980px;
+  width: calc(100% - 48px);
+}
+
+.config-hint .el-icon {
+  font-size: 16px;
+  flex-shrink: 0;
+  margin-top: 2px;
+}
+
+.retry-btn {
+  margin-top: 16px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 10px 24px;
+  background: #ff6b00;
+  border-color: #ff6b00;
+}
+
+.retry-btn:hover {
+  background: #ff8533;
+  border-color: #ff8533;
+}
+
 @media (max-width: 1200px) {
   .course-grid {
     grid-template-columns: repeat(3, 1fr);
@@ -1269,5 +1664,44 @@ function onPhotoClick(item) {
     max-width: none;
     margin: 12px 0 0;
   }
+}
+
+
+
+/* 深色模式适配 */
+.page-wrapper.is-dark {
+  background: #020617;
+}
+
+.page-wrapper.is-dark .main-header {
+  background: #020617;
+  border-bottom-color: #1e293b;
+}
+
+.page-wrapper.is-dark .course-card {
+  background: #020617;
+  border-color: #1e293b;
+  color: #e5e7eb;
+}
+
+.page-wrapper.is-dark .course-title {
+  color: #f9fafb;
+}
+
+.page-wrapper.is-dark .course-desc {
+  color: #9ca3af;
+}
+
+.page-wrapper.is-dark .info-item {
+  color: #9ca3af;
+}
+
+.page-wrapper.is-dark .fixed-action-panel {
+  background: #1e293b;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+}
+
+.page-wrapper.is-dark .action-button {
+  color: #e5e7eb;
 }
 </style>

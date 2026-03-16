@@ -1,9 +1,11 @@
 <script setup>
 import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { Search, ArrowLeft, CaretBottom } from '@element-plus/icons-vue'
-import { getRecord, searchRecords } from '@/utils/feishu'
+import { Search, ArrowLeft, CaretBottom, View, WarningFilled, RefreshRight } from '@element-plus/icons-vue'
+import { getRecord, searchRecords, updateRecord, getFriendlyError, isConfigured } from '@/utils/feishu'
 import { normalizeToArray, getText, getCoverUrl, extractUrl, DEFAULT_COVER, mapKeysToEnglish } from '@/utils/data-mapping'
+import { scrollToTop, getHeroImageSrc, openInNewTab, useDarkMode } from '@/utils/ui'
+import FixedActionPanel from '@/components/FixedActionPanel.vue'
 import logoImg from '@/images/logo.jpg'
 import teacherImg from '@/images/detail/teacher.webp'
 import outcomeImg1 from '@/images/detail/textDetail/Mask group.png'
@@ -31,78 +33,101 @@ import xiangmuliuchengIcon from '@/images/icon_ewd2dbl138v/xiangmuliucheng.png'
 const route = useRoute()
 const router = useRouter()
 
+import { useSticky } from '@/utils/sticky'
 const stickyCardRef = ref(null)
-const isSticky = ref(false)
-const stickyOffsetTop = ref(0)
+const { isSticky } = useSticky(() => stickyCardRef.value ? stickyCardRef.value.$el : null, { headerHeight: 80, offset: 16 })
 
-function handleScroll() {
-  if (!stickyCardRef.value) return
+const { isDarkMode, toggleDarkMode } = useDarkMode()
 
-  const card = stickyCardRef.value.$el
-
-  // 首次记录卡片的初始位置
-  if (stickyOffsetTop.value === 0) {
-    stickyOffsetTop.value = card.offsetTop
-  }
-    
-  const headerHeight = 80
-  const offset = 16
-  const targetTop = headerHeight + offset
-  const scrollTop = window.scrollY || document.documentElement.scrollTop
-
-  // 当滚动超过卡片初始位置时，固定卡片
-  if (scrollTop + targetTop >= stickyOffsetTop.value) {
-    isSticky.value = true
-  } else {
-    isSticky.value = false
-  }
-}
-
-const isDarkMode = ref(false)
-
-const toggleDarkMode = () => {
-  isDarkMode.value = !isDarkMode.value
-}
-
-const scrollToTop = () => {
-  window.scrollTo({
-    top: 0,
-    behavior: 'smooth'
-  })
-}
 
 const fetchedData = ref(null)
-const appToken = 'HhWdbVvL9atRhzss0Ggc25lDnRx'
-const tableId = 'tblFZLlvetV0Lpcd'
+const isLoading = ref(false)
+const isError = ref(false)
+const errorMessage = ref('')
+const errorType = ref('')
 
-onMounted(async () => {
-  window.addEventListener('scroll', handleScroll)
-  handleScroll() // 初始化检查
-  
+const appToken = import.meta.env.VITE_FEISHU_APP_TOKEN || 'HhWdbVvL9atRhzss0Ggc25lDnRx'
+const tableId = import.meta.env.VITE_FEISHU_TABLE_ID || 'tblFZLlvetV0Lpcd'
+
+// 加载数据函数（可重试）
+const loadData = async () => {
   // 获取飞书数据
   const id = route.params.id
   console.log('🔍 Detail Page Mounted. Route ID:', id)
-  
-  // 如果 ID 不是 1 且存在，尝试获取真实数据
-  if (id && id !== '1') {
+
+  // 检查配置
+  if (!isConfigured()) {
+    isError.value = true
+    errorMessage.value = '未配置飞书 API，请联系管理员配置环境变量'
+    errorType.value = 'config'
+    return
+  }
+
+  // 尝试获取真实数据
+  if (id) {
+    isLoading.value = true
+    isError.value = false
+    errorMessage.value = ''
+
     try {
       const record = await getRecord(appToken, tableId, id)
       if (record) {
         console.log('✅ Fetched Real Record:', record)
         fetchedData.value = record
+
+        // 自动增加浏览量
+        try {
+          const sessionKey = `viewed_${id}`;
+          if (!sessionStorage.getItem(sessionKey)) {
+             const currentViews = record.fields['浏览量'] || record.fields['浏览次数'] || 0;
+             const newViews = currentViews + 1;
+
+             // 乐观更新本地数据
+             if (fetchedData.value.fields) {
+               fetchedData.value.fields['浏览量'] = newViews;
+             }
+
+             // 异步更新后端
+             updateRecord(appToken, tableId, id, { '浏览量': newViews }).then(() => {
+               console.log('👀 Views incremented to', newViews);
+               sessionStorage.setItem(sessionKey, 'true');
+             }).catch(err => {
+               console.error('Failed to update views in backend:', err);
+             });
+          }
+        } catch (err) {
+          console.error('Failed to handle view increment:', err);
+        }
+
         await loadRelatedProjects()
       } else {
         console.warn('⚠️ No record found for ID:', id)
+        isError.value = true
+        errorMessage.value = '未找到该课题信息'
+        errorType.value = 'not_found'
       }
     } catch (e) {
       console.error('Failed to fetch record:', e)
+      const friendlyErr = getFriendlyError(e)
+      isError.value = true
+      errorMessage.value = friendlyErr.friendlyMessage
+      errorType.value = friendlyErr.type
+    } finally {
+      isLoading.value = false
     }
   }
+}
+
+// 重试加载
+const handleRetry = () => {
+  loadData()
+}
+
+onMounted(() => {
+  loadData()
 })
 
-onUnmounted(() => {
-  window.removeEventListener('scroll', handleScroll)
-})
+onUnmounted(() => {})
 
 const searchText = ref('')
 
@@ -156,7 +181,8 @@ const item = computed(() => {
           ],
     img:
       route.query.img ||
-      'https://lh3.googleusercontent.com/aida-public/AB6AXuDVsDcyeTttES1IDZMK-vp770XwEk4W84Og2wvwuWlJ17nfm9Y0zjoWGTHGXjqmTtaXlocRxmimCOJrhVesjpx9v5Ck9f8KD8cJK8r9iSo30PxydtV1q-uy28n3xju7guBjxmBQgFaynr1i_K55urVFL7KnygeD-AjB7lpOeKK4PyzNNXk995o6kJjxRMtgWHuqQPodpKBl295CkMW95VUWBxzWoV4pJios2GH1Vp5HHKIg0OfnXzATL83xkMsgJBH2F1QCYjpfhqY'
+      'https://lh3.googleusercontent.com/aida-public/AB6AXuDVsDcyeTttES1IDZMK-vp770XwEk4W84Og2wvwuWlJ17nfm9Y0zjoWGTHGXjqmTtaXlocRxmimCOJrhVesjpx9v5Ck9f8KD8cJK8r9iSo30PxydtV1q-uy28n3xju7guBjxmBQgFaynr1i_K55urVFL7KnygeD-AjB7lpOeKK4PyzNNXk995o6kJjxRMtgWHuqQPodpKBl295CkMW95VUWBxzWoV4pJios2GH1Vp5HHKIg0OfnXzATL83xkMsgJBH2F1QCYjpfhqY',
+    views: route.query.views || 2345 // 默认浏览量
   }
 
   if (!fetchedData.value || !fetchedData.value.fields) {
@@ -178,8 +204,9 @@ const item = computed(() => {
     const mentorType = route.query.mentorType || getText(combined.mentorType || combined.mentor_type_cn || combined.mentor_title || combined.title_job)
     const primaryList = normalizeToArray(combined.primary_subject)
     const secondaryList = normalizeToArray(combined.secondary_subject)
-    const imgUrl = getCoverUrl(combined)
+    const imgUrl = getCoverUrl(combined, 1200)
     const headImgUrl = extractUrl(combined.cover_image_test || combined['头图地址测试'])
+    const views = combined.views || combined['浏览量'] || combined['浏览次数'] || defaults.views
 
     const finalItem = {
       ...defaults,
@@ -193,7 +220,8 @@ const item = computed(() => {
       refMentorName: teacher || defaults.refMentorName,
       refMentorTitle: mentorType || defaults.refMentorTitle,
       img: imgUrl || defaults.img,
-      headImg: headImgUrl // 添加头图字段
+      headImg: headImgUrl, // 添加头图字段
+      views: views // 添加浏览量字段
     }
 
     console.log('🎨 Computed Final Item:', finalItem)
@@ -286,16 +314,18 @@ async function loadRelatedProjects() {
         const primaryList = normalizeToArray(c['一级学科'] || c.primary_subject)
         const secondaryList = normalizeToArray(c['二级学科'] || c.secondary_subject)
         const tags = [primaryList[0], secondaryList[0]].filter(Boolean)
-        return {
-          id: r.record_id,
-          title,
-          desc: getText(c['课题描述'] || c['课题简介'] || c['项目简介'] || c['描述'] || c.description_cn || c.description_intro),
-          tags,
-          img: getCoverUrl(c)
-        }
+          const headImg = extractUrl(c.cover_image_test || c['头图地址测试'])
+          const coverImg = getCoverUrl(c)
+          return {
+            id: r.record_id,
+            title,
+            desc: getText(c['课题描述'] || c['课题简介'] || c['项目简介'] || c['描述'] || c.description_cn || c.description_intro),
+            tags,
+            img: headImg || coverImg || defaultHero
+          }
       })
 
-    relatedProjects.value = list.slice(0, 3)
+    relatedProjects.value = list
   } catch (e) {
     console.error('加载导师其他课题失败:', e)
   }
@@ -328,10 +358,8 @@ function goBack() {
 }
 
 function downloadPoster() {
-  const src = item.value.img
-  if (src) {
-    window.open(src, '_blank')
-  }
+  const src = getHeroImageSrc(item.value, defaultHero)
+  openInNewTab(src)
 }
 
 function goToRelated(p) {
@@ -342,7 +370,26 @@ function goToRelated(p) {
 
 <template>
   <div class="detail-page" :class="{ 'is-dark': isDarkMode }">
-    <header class="main-header">
+    <!-- 加载状态 -->
+    <div v-if="isLoading" class="loading-overlay">
+      <div class="loading-spinner"></div>
+      <p class="loading-text">正在加载课题详情...</p>
+    </div>
+
+    <!-- 错误状态 -->
+    <div v-else-if="isError" class="error-overlay">
+      <div class="error-content">
+        <el-icon class="error-icon"><WarningFilled /></el-icon>
+        <p class="error-title">加载失败</p>
+        <p class="error-message">{{ errorMessage }}</p>
+        <el-button type="primary" class="retry-btn" @click="handleRetry">
+          <el-icon><RefreshRight /></el-icon>
+          重试
+        </el-button>
+      </div>
+    </div>
+
+    <header v-else-if="!isError" class="main-header">
       <div class="header-content">
         <div class="logo">
           <img :src="logoImg" class="logo-img" alt="中科探才" />
@@ -375,7 +422,7 @@ function goToRelated(p) {
       </div>
     </header>
 
-    <main class="detail-main">
+    <main v-if="!isLoading && !isError" class="detail-main">
       <div class="breadcrumb-container">
         <div class="back-btn" @click="goBack">
           <el-icon><ArrowLeft /></el-icon>
@@ -399,6 +446,10 @@ function goToRelated(p) {
               fit="cover"
               class="hero-image"
             />
+            <div class="hero-views" v-if="item.views > 0">
+              <el-icon><View /></el-icon>
+              <span>{{ item.views }}</span>
+            </div>
           </div>
           <div class="hero-right">
             <div class="hero-title">{{ item.title }}</div>
@@ -665,7 +716,7 @@ function goToRelated(p) {
               <div class="side-content-wrapper">
                 <div class="side-project-list">
                   <div
-                    v-for="p in relatedProjects"
+                    v-for="p in relatedProjects.slice(0, 3)"
                     :key="p.id || p.title"
                     class="side-project-item"
                     @click="goToRelated(p)"
@@ -683,7 +734,7 @@ function goToRelated(p) {
                     </div>
                   </div>
                 </div>
-                <div class="side-card-footer">
+                <div class="side-card-footer" v-if="relatedCount > 3">
                   <span class="view-more">查看更多</span>
                   <el-icon><CaretBottom /></el-icon>
                 </div>
@@ -760,30 +811,101 @@ function goToRelated(p) {
     </footer>
 
     <!-- 右侧固定功能模块 -->
-    <div class="fixed-action-panel">
-      <div class="action-button" @click="toggleDarkMode">
-        <div class="action-icon">
-          <img :src="isDarkMode ? qiansemoshiIcon : shensemoshiIcon" :alt="isDarkMode ? '浅色模式' : '深色模式'" />
-        </div>
-        <div class="action-text">{{ isDarkMode ? '浅色模式' : '深色模式' }}</div>
-      </div>
-      <div class="action-button">
-        <div class="action-icon">
-          <img :src="xiazaihaibaoIcon" alt="下载海报" />
-        </div>
-        <div class="action-text">下载海报</div>
-      </div>
-      <div class="action-button" @click="scrollToTop">
-        <div class="action-icon">
-          <img :src="fanhuidingbuIcon" alt="返回顶部" />
-        </div>
-        <div class="action-text">返回顶部</div>
-      </div>
-    </div>
+    <FixedActionPanel
+      v-if="!isLoading && !isError"
+      :isDarkMode="isDarkMode"
+      :qiansemoshiIcon="qiansemoshiIcon"
+      :shensemoshiIcon="shensemoshiIcon"
+      :fanhuidingbuIcon="fanhuidingbuIcon"
+      :downloadIcon="xiazaihaibaoIcon"
+      :showDownload="true"
+      :top="500"
+      @toggle-dark="toggleDarkMode"
+      @scroll-top="scrollToTop"
+      @download="downloadPoster"
+    />
   </div>
 </template>
 
 <style scoped>
+/* 加载和错误状态样式 */
+.loading-overlay,
+.error-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: #f5f5f5;
+  z-index: 9999;
+}
+
+.error-overlay {
+  flex-direction: column;
+  background: rgba(255, 255, 255, 0.95);
+}
+
+.loading-spinner {
+  width: 48px;
+  height: 48px;
+  border: 4px solid #f0f0f0;
+  border-top-color: #ff6b00;
+  border-radius: 50%;
+  animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
+.loading-text {
+  margin-top: 16px;
+  color: #666;
+  font-size: 14px;
+}
+
+.error-content {
+  text-align: center;
+  padding: 40px;
+}
+
+.error-icon {
+  font-size: 64px;
+  color: #ff4d4f;
+  margin-bottom: 16px;
+}
+
+.error-title {
+  font-size: 20px;
+  font-weight: 600;
+  color: #333;
+  margin-bottom: 8px;
+}
+
+.error-message {
+  font-size: 14px;
+  color: #666;
+  margin-bottom: 24px;
+  max-width: 400px;
+}
+
+.retry-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 10px 24px;
+  background: #ff6b00;
+  border-color: #ff6b00;
+}
+
+.retry-btn:hover {
+  background: #ff8533;
+  border-color: #ff8533;
+}
+
 :deep(.el-button--primary) {
   --el-button-bg-color: #ff6b00;
   --el-button-border-color: #ff6b00;
@@ -1024,6 +1146,23 @@ function goToRelated(p) {
 .hero-left {
   width: 480px;
   flex-shrink: 0;
+  position: relative;
+}
+
+.hero-views {
+  position: absolute;
+  bottom: 12px;
+  right: 12px;
+  background: rgba(0, 0, 0, 0.6);
+  padding: 4px 8px;
+  border-radius: 4px;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  color: #fff;
+  font-size: 12px;
+  z-index: 10;
+  pointer-events: none;
 }
 
 .hero-image {
@@ -1976,9 +2115,10 @@ function goToRelated(p) {
 }
 
 .mentor-section-text {
-  font-size: 12px;
+  font-size: 14px;
   color: #666;
-  line-height: 1.8;
+  font-weight: 500;
+  /* line-height: 1.8; */
 }
 
 .mentor-disclaimer {
@@ -2170,49 +2310,5 @@ function goToRelated(p) {
   }
 }
 
-.fixed-action-panel {
-  position: fixed;
-  right: 24px;
-  top: 240px;
-  background: #fff;
-  border-radius: 41px;
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
-  padding: 16px 8px;
-  display: flex;
-  flex-direction: column;
-  gap: 24px;
-  z-index: 1000;
-}
-
-.action-button {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 4px;
-  cursor: pointer;
-  color: #333;
-}
-
-.action-icon {
-  width: 24px;
-  height: 24px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-}
-
-.action-icon img {
-  width: 100%;
-  height: 100%;
-  object-fit: contain;
-}
-
-.action-text {
-  font-size: 12px;
-  line-height: 1;
-}
+ 
 </style>
-
-
-
-

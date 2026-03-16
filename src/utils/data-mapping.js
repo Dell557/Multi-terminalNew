@@ -1,5 +1,6 @@
 
-export const DEFAULT_COVER = 'https://plus.unsplash.com/premium_photo-1664302452049-743034bba26c?q=80&w=1600&auto=format&fit=crop'
+export const DEFAULT_COVER_BASE = 'https://plus.unsplash.com/premium_photo-1664302452049-743034bba26c?q=80&auto=format&fit=crop'
+export const DEFAULT_COVER = `${DEFAULT_COVER_BASE}&w=400`
 
 export const normalizeToArray = (value) => {
   if (!value) return []
@@ -85,8 +86,20 @@ export const extractUrl = (val) => {
   return null
 }
 
-export const getCoverUrl = (fields) => {
-  const def = DEFAULT_COVER
+const optimizeUrl = (url, width) => {
+  if (!url) return null
+  if (url.includes('unsplash.com')) {
+    if (url.includes('w=')) {
+      return url.replace(/w=\d+/, `w=${width}`)
+    }
+    const separator = url.includes('?') ? '&' : '?'
+    return `${url}${separator}w=${width}`
+  }
+  return url
+}
+
+export const getCoverUrl = (fields, width = 400) => {
+  const def = `${DEFAULT_COVER_BASE}&w=${width}`
   if (!fields) return def
 
   // 1. 尝试匹配所有可能的字段名 (优先使用 poster_image_test)
@@ -105,11 +118,6 @@ export const getCoverUrl = (fields) => {
     const v = fields[key]
     if (!v) continue
 
-    // 调试日志：如果找到了海报字段，打印一下它的结构
-    if (key === 'poster_image_test' || key === '海报地址测试') {
-      // console.log(`🔍 Found potential cover in [${key}]:`, v)
-    }
-
     let url = null
     if (Array.isArray(v)) {
       for (const item of v) {
@@ -121,10 +129,7 @@ export const getCoverUrl = (fields) => {
     }
 
     if (url) {
-      if (key === 'poster_image_test' || key === '海报地址测试') {
-        // console.log(`✅ Successfully extracted URL from [${key}]:`, url)
-      }
-      return url
+      return optimizeUrl(url, width)
     }
   }
 
@@ -162,7 +167,9 @@ export const fieldMapping = {
   '导师职称': 'mentor_title',
   '职称': 'title_job',
   '适合专业': 'suitable_major',
-  '专业要求': 'major_requirement'
+  '专业要求': 'major_requirement',
+  '浏览量': 'views',
+  '浏览次数': 'views'
 };
 
 export const mapKeysToEnglish = (fields) => {

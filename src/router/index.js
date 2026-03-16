@@ -18,6 +18,10 @@ const router = createRouter({
       name: 'detail',
       component: () => import('@/views/detail/DetailView.vue'),
     },
+    {
+      path: '/:pathMatch(.*)*',
+      redirect: '/',
+    },
   ],
   scrollBehavior(to, from, savedPosition) {
     if (savedPosition) {
