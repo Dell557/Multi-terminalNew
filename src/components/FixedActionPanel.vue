@@ -51,8 +51,13 @@ const panelStyle = computed(() => ({ top: `${props.top}px` }))
 }
 
 .fixed-action-panel.is-dark {
-  background: #1e293b;
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+  background: #3b3f49;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.35);
+}
+
+.fixed-action-panel.is-dark .action-button {
+  color: rgba(229, 231, 235, 0.8);
 }
 
 .action-button {

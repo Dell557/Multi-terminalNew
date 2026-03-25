@@ -1,4 +1,4 @@
-# wu_zk
+# wu_pc
 
 This template should help get you started developing with Vue 3 in Vite.
 

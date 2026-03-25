@@ -1,0 +1,16 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(npm run build)",
+      "WebFetch(domain:localhost)",
+      "Bash(npm ls:*)",
+      "WebFetch(domain:github.com)",
+      "Bash(npm run server)",
+      "Bash(curl:*)",
+      "Bash(taskkill:*)",
+      "Bash(netstat -ano)",
+      "Bash(findstr:*)",
+      "Bash(powershell -Command:*)"
+    ]
+  }
+}

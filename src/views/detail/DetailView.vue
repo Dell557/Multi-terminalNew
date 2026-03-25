@@ -51,30 +51,47 @@ const { appToken, tableId } = getBitableConfig()
 
 // 加载数据函数（可重试）
 const loadData = async () => {
-  // 获取飞书数据
   const id = route.params.id
   console.log('🔍 Detail Page Mounted. Route ID:', id)
 
-  // 检查配置
-  if (!isConfigured()) {
-    isError.value = true
-    errorMessage.value = '未配置飞书 API，请联系管理员配置环境变量'
-    errorType.value = 'config'
-    return
-  }
+  if (!id) return
 
-  if (!isBitableConfigured()) {
-    isError.value = true
-    errorMessage.value = '未配置多维表格，请联系管理员配置环境变量'
-    errorType.value = 'config'
-    return
-  }
+  isLoading.value = true
+  isError.value = false
+  errorMessage.value = ''
+  errorType.value = ''
 
-  // 尝试获取真实数据
-  if (id) {
-    isLoading.value = true
-    isError.value = false
-    errorMessage.value = ''
+  try {
+    try {
+      const controller = new AbortController()
+      const t = setTimeout(() => controller.abort(), 10000)
+      const resp = await fetch(`/api/courses/${encodeURIComponent(String(id))}`, { signal: controller.signal })
+      clearTimeout(t)
+      if (resp.ok) {
+        const data = await resp.json()
+        if (data?.item?.fields) {
+          fetchedData.value = data.item
+          if (isConfigured() && isBitableConfigured()) {
+            await loadRelatedProjects()
+          }
+          return
+        }
+      }
+    } catch (e) {}
+
+    if (!isConfigured()) {
+      isError.value = true
+      errorMessage.value = '未配置飞书 API，请联系管理员配置环境变量'
+      errorType.value = 'config'
+      return
+    }
+
+    if (!isBitableConfigured()) {
+      isError.value = true
+      errorMessage.value = '未配置多维表格，请联系管理员配置环境变量'
+      errorType.value = 'config'
+      return
+    }
 
     try {
       const record = await getRecord(appToken, tableId, id)
@@ -95,12 +112,14 @@ const loadData = async () => {
              }
 
              // 异步更新后端
-             updateRecord(appToken, tableId, id, { '浏览量': newViews }).then(() => {
-               console.log('👀 Views incremented to', newViews);
-               sessionStorage.setItem(sessionKey, 'true');
-             }).catch(err => {
-               console.error('Failed to update views in backend:', err);
-             });
+             if (String(id).startsWith('rec')) {
+               updateRecord(appToken, tableId, id, { '浏览量': newViews }).then(() => {
+                 console.log('👀 Views incremented to', newViews);
+                 sessionStorage.setItem(sessionKey, 'true');
+               }).catch(err => {
+                 console.error('Failed to update views in backend:', err);
+               });
+             }
           }
         } catch (err) {
           console.error('Failed to handle view increment:', err);
@@ -119,9 +138,9 @@ const loadData = async () => {
       isError.value = true
       errorMessage.value = friendlyErr.friendlyMessage
       errorType.value = friendlyErr.type
-    } finally {
-      isLoading.value = false
     }
+  } finally {
+    isLoading.value = false
   }
 }
 
@@ -202,17 +221,17 @@ const item = computed(() => {
     const combined = { ...f, ...englishFields }
     
     // 提取各个字段
-    const title = getText(combined.project_name_cn || combined.project_name || combined.title_raw)
-    const desc = getText(combined.description_cn || combined.description_intro || combined.project_intro || combined.description_raw)
+    const title = getText(combined.project_name_cn || combined.project_name || combined.title_raw || combined.title)
+    const desc = getText(combined.description_cn || combined.description_intro || combined.project_intro || combined.description_raw || combined.summary || combined.content)
     // 优先使用路由传递过来的 university
-    const university = route.query.university || getText(combined.university || combined['导师院校'] || combined.school || combined.college || combined.university_raw)
-    const teacher = getText(combined.mentor_name_cn || combined.mentor || combined.teacher)
+    const university = route.query.university || getText(combined.university || combined['导师院校'] || combined.school || combined.college || combined.university_raw || combined.organization || combined.org_name)
+    const teacher = getText(combined.mentor_name_cn || combined.mentor || combined.teacher || combined.mentor_name || combined.teacher_name)
     // 优先使用路由传递过来的 mentorType (从列表页带过来的正确显示值)，如果不存在则尝试从 fetch 数据中获取
-    const mentorType = route.query.mentorType || getText(combined.mentorType || combined.mentor_type_cn || combined.mentor_title || combined.title_job)
-    const primaryList = normalizeToArray(combined.primary_subject)
-    const secondaryList = normalizeToArray(combined.secondary_subject)
+    const mentorType = route.query.mentorType || getText(combined.mentorType || combined.mentor_type_cn || combined.mentor_title || combined.title_job || combined.title)
+    const primaryList = normalizeToArray(combined.primary_subject || combined.category1 || combined.level1)
+    const secondaryList = normalizeToArray(combined.secondary_subject || combined.category2 || combined.level2)
     const imgUrl = getCoverUrl(combined, 1200)
-    const headImgUrl = extractUrl(combined.cover_image_test || combined['头图地址测试'])
+    const headImgUrl = extractUrl(combined.cover_image_test || combined['头图地址测试'] || combined.banner_url)
     const views = combined.views || combined['浏览量'] || combined['浏览次数'] || defaults.views
 
     const finalItem = {
@@ -459,7 +478,7 @@ function handleImageError(event) {
         <section class="hero-card">
           <div class="hero-left">
             <el-image
-              :src="item.headImg || item.img || defaultHero"
+              :src="getHeroImageSrc(item, publicImg)"
               fit="cover"
               class="hero-image"
             >
@@ -942,12 +961,12 @@ function handleImageError(event) {
 }
 
 .detail-page.is-dark {
-  background: #020617;
+  background: #1b1e27;
 }
 
 .detail-page.is-dark .main-header {
-  background: #020617;
-  border-bottom-color: #1e293b;
+  background: #3b3f49;
+  border-bottom-color: transparent;
 }
 
 .detail-page.is-dark .breadcrumb-container {
@@ -961,9 +980,10 @@ function handleImageError(event) {
 .detail-page.is-dark .hero-card,
 .detail-page.is-dark .section-card,
 .detail-page.is-dark .side-card {
-  background: #020617;
-  color: #e5e7eb;
-  box-shadow: 0 2px 12px rgba(15, 23, 42, 0.9);
+  background: #3b3f49;
+  color: rgba(229, 231, 235, 0.9);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.28);
 }
 
 .detail-page.is-dark .hero-title,
@@ -980,8 +1000,21 @@ function handleImageError(event) {
 }
 
 .detail-page.is-dark .detail-footer {
-  background: #020617;
-  border-top-color: #1f2937;
+  background: #1b1e27;
+  border-top-color: rgba(255, 255, 255, 0.12);
+}
+
+.detail-page.is-dark .header-search-input :deep(.el-input__wrapper) {
+  background-color: rgba(0, 0, 0, 0.12);
+  border-color: #ff6b00;
+}
+
+.detail-page.is-dark .header-search-input :deep(.el-input__inner) {
+  color: rgba(249, 250, 251, 0.92);
+}
+
+.detail-page.is-dark .header-search-input :deep(.el-input__inner::placeholder) {
+  color: rgba(229, 231, 235, 0.5);
 }
 
 .main-header {

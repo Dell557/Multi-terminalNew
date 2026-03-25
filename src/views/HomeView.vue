@@ -281,12 +281,100 @@ const toggleFavorite = id => {
 }
 const isFavorited = id => favoriteIds.value.has(id)
 
+const getSuitTagList = item => {
+  const raw = item && typeof item.suit === 'string' ? item.suit : ''
+  if (!raw) return []
+  return raw
+    .split(/[|｜]/g)
+    .map(s => s.trim())
+    .filter(Boolean)
+}
+
+const getSuitTagMore = (item, max = 2) => {
+  const list = getSuitTagList(item)
+  return Math.max(0, list.length - max)
+}
+
+const handleFeishuLikeItems = (items) => {
+  console.log('--- [DEBUG] Frontend Received Items ---', items)
+  const map = new Map()
+  const courses = []
+  const arr = Array.isArray(items) ? items : []
+  arr.forEach((record) => {
+    const f = record.fields || {}
+    console.log('--- [DEBUG] Record Fields ---', f)
+    const englishFields = mapKeysToEnglish(f)
+    const imgUrl = getCoverUrl({ ...f, ...englishFields })
+    const headImg = extractUrl(f['头图地址测试'])
+    const posterImg = extractUrl(f['海报地址测试'])
+    const primaryList = normalizeToArray(f['一级学科'])
+    const secondaryList = normalizeToArray(f['二级学科'])
+    if (primaryList.length && secondaryList.length) {
+      primaryList.forEach((p) => {
+        if (!map.has(p)) map.set(p, new Set())
+        secondaryList.forEach((s) => { if (s) map.get(p).add(s) })
+      })
+    }
+    const primaryValue = primaryList[0] || '其他'
+    const secondaryValue = secondaryList[0] || '其他'
+    courses.push({
+      ...englishFields,
+      id: record.record_id || englishFields.id || Math.random().toString(36).slice(2),
+      title: getText(f['教授课题名称'] || f['课题名称'] || f['项目名称'] || f['标题'] || f['title']) || '未命名课题',
+      desc: getText(f['课题描述'] || f['课题简介'] || f['项目简介'] || f['简介'] || f['描述'] || f['summary'] || f['content']) || '暂无简介',
+      img: imgUrl,
+      headImg,
+      posterImg,
+      primary: primaryValue,
+      secondary: secondaryValue,
+      university: getText(f['导师院校'] || f['大学'] || f['学校'] || f['院校'] || f['university'] || f['school'] || f['导师所在/毕业院校'] || f['university_raw'] || f['organization'] || f['org_name']) || '未知大学',
+      teacher: getText(f['导师姓名'] || f['导师'] || f['教师'] || f['mentor_name_cn'] || f['mentor'] || f['teacher'] || f['mentor_name'] || f['teacher_name']) || '未知导师',
+      mentorType: getText(englishFields['mentor_type_cn'] || f['导师类型'] || f['导师职称'] || f['职称'] || f['mentor_title'] || f['title_job'] || f['title']) || '导师',
+      suit: getText(f['适合专业'] || f['专业要求'] || f['suitable_major'] || f['major_requirement'] || f['suit']) || ''
+    })
+  })
+  if (map.size > 0) {
+    const newData = []
+    for (const [name, childrenSet] of map) {
+      newData.push({ name, children: Array.from(childrenSet) })
+    }
+    subjectData.value = newData
+  }
+  allCourses.value = courses
+}
+const getVisibleCardTags = (item) => {
+  const tags = []
+  if (item && item.primary) tags.push({ text: item.primary, type: 'main' })
+  if (item && item.secondary) tags.push({ text: item.secondary, type: 'main' })
+  return tags
+}
 // 加载数据函数（可重试）
-const loadData = () => {
+const loadData = async () => {
   const fallbackCourses =
     Array.isArray(allCourses.value) && allCourses.value.length
       ? allCourses.value
       : mockPhotos
+
+  isLoading.value = true
+  isError.value = false
+  errorMessage.value = ''
+  errorType.value = ''
+
+  // 优先请求后端 /api/courses（MySQL 有则用；超时则由服务器自动回退飞书）
+  try {
+    const controller = new AbortController()
+    const t = setTimeout(() => controller.abort(), 10000)
+    const resp = await fetch('/api/courses?limit=200', { signal: controller.signal })
+    clearTimeout(t)
+    if (resp.ok) {
+      const data = await resp.json()
+      if (Array.isArray(data?.items) && data.items.length) {
+        handleFeishuLikeItems(data.items)
+        isLoading.value = false
+        return
+      }
+    }
+  } catch (e) {}
 
   // --- 飞书数据集成 ---
   // 1. 检查配置是否已完成
@@ -319,10 +407,6 @@ const loadData = () => {
 
   showConfigHint.value = false
   configHintMessage.value = ''
-  isLoading.value = true
-  isError.value = false
-  errorMessage.value = ''
-  errorType.value = ''
 
   // 2. 配置您的多维表格信息
   const { appToken, tableId } = getBitableConfig()
@@ -685,8 +769,22 @@ function goHome() {
           {{ item.mentorType }}
         </div>
 			  <button class="favorite-btn" :class="{ active: isFavorited(item.id) }" @click.stop="toggleFavorite(item.id)">
-				<el-icon><StarFilled /></el-icon>
-			  </button>
+          <svg class="favorite-icon" viewBox="0 0 24 24" aria-hidden="true">
+            <path
+              v-if="isFavorited(item.id)"
+              fill="currentColor"
+              d="M12 21.35l-1.45-1.32C5.4 15.36 2 12.28 2 8.5 2 6 4 4 6.5 4c1.74 0 3.41.81 4.5 2.09C12.09 4.81 13.76 4 15.5 4 18 4 20 6 20 8.5c0 3.78-3.4 6.86-8.55 11.54L12 21.35z"
+            />
+            <path
+              v-else
+              fill="none"
+              stroke="currentColor"
+              stroke-width="1.8"
+              stroke-linejoin="round"
+              d="M12 20.6l-1.35-1.23C5.35 14.88 2.2 12.01 2.2 8.5 2.2 6.1 4.1 4.2 6.5 4.2c1.72 0 3.37.8 4.5 2.07 1.13-1.27 2.78-2.07 4.5-2.07 2.4 0 4.3 1.9 4.3 4.3 0 3.51-3.15 6.38-8.45 10.88L12 20.6z"
+            />
+          </svg>
+        </button>
 			</div>
 			<div class="hover-detail">
 			  <h3 class="hover-title" :title="item.title">{{ item.title }}</h3>
@@ -699,13 +797,22 @@ function goHome() {
 			<div class="card-content">
 			  <h3 class="card-title" :title="item.title">{{ item.title }}</h3>
 			  <div class="card-tags">
-				<span class="tag-item">{{ item.primary }}</span>
-				<span class="tag-item" v-if="item.secondary">{{ item.secondary }}</span>
+        <span
+          v-for="tag in getVisibleCardTags(item)"
+          :key="`${item.id}-tag-${tag.text}`"
+          class="tag-item tag-item--main"
+        >{{ tag.text }}</span>
 			  </div>
               <p class="card-desc">{{ truncate(item.desc, 120) }}</p>
 			  <div class="card-footer">
-				<div class="footer-item"><el-icon><School /></el-icon><span>{{ item.university }}</span></div>
-				<div class="footer-item"><el-icon><User /></el-icon><span>{{ item.teacher }}</span></div>
+				<div class="footer-item">
+          <el-icon><School /></el-icon>
+          <span class="footer-text" :title="item.university">{{ item.university }}</span>
+        </div>
+				<div class="footer-item" v-if="item.teacher && item.teacher.trim()">
+          <el-icon><User /></el-icon>
+          <span class="footer-text" :title="item.teacher">{{ item.teacher }}</span>
+        </div>
 			  </div>
 			</div>
 		  </div>
@@ -1191,23 +1298,41 @@ function goHome() {
 }
 
 .course-grid.list-view .card-cover {
-  width: 160px;
-  height: auto;
-  min-height: 120px;
+  width: 168px;
+  height: calc(100% - 32px);
   flex-shrink: 0;
-  border-radius: 8px;
+  border-radius: 10px;
   margin: 16px;
 }
 
 .course-grid.list-view .mentor-badge {
-  left: 12px;
-  right: auto;
+  left: auto;
+  right: 12px;
   top: 12px;
+  height: 24px;
+  padding: 0 10px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.course-grid.list-view .badge-prof {
+  background: #fff0e6;
+  color: #ff6b00;
+}
+
+.course-grid.list-view .badge-phd {
+  background: #e6f4ff;
+  color: #1677ff;
+}
+
+.course-grid.list-view .cover-title {
+  display: none;
 }
 
 .course-grid.list-view .hover-detail {
   position: absolute;
-  left: 192px;
+  left: 200px;
   right: 0;
   top: 0;
   bottom: 0;
@@ -1223,27 +1348,67 @@ function goHome() {
 }
 
 .course-grid.list-view .card-content {
-  padding: 16px 16px 16px 0;
+  padding: 16px 20px 16px 0;
 }
 
 .course-grid.list-view .card-title {
-  font-size: 15px;
-  -webkit-line-clamp: 1;
-  height: auto;
-  margin-bottom: 8px;
+  font-size: 16px;
+  font-weight: 500;
+  line-height: 24px;
+  -webkit-line-clamp: 2;
+  height: 48px;
+  margin-bottom: 12px;
 }
 
 .course-grid.list-view .card-tags {
+  gap: 6px;
+  flex-wrap: nowrap;
+  overflow: hidden;
   margin-bottom: 8px;
 }
 
+.course-grid.list-view .tag-item {
+  height: 24px;
+  line-height: 20px;
+  padding: 2px 10px;
+  border-radius: 999px;
+  font-weight: 500;
+  border: 1px solid transparent;
+  white-space: nowrap;
+}
+
+.course-grid.list-view .tag-item--main {
+  background: #fff3ea;
+  color: #ff6b00;
+  border-color: rgba(255, 107, 0, 0.18);
+}
+
+.course-grid.list-view .tag-item--suit {
+  background: #eef0f4;
+  color: #8c8c8c;
+  border-color: rgba(0, 0, 0, 0.06);
+}
+
+.tag-item--more {
+  padding-left: 6px;
+  padding-right: 6px;
+  min-width: 20px;
+  text-align: center;
+}
+
 .course-grid.list-view .card-desc {
-  margin-bottom: 12px;
-  -webkit-line-clamp: 2;
+  font-size: 14px;
+  color: #999;
+  line-height: 22px;
+  margin-bottom: 14px;
+  -webkit-line-clamp: 1;
+  flex: 0 0 auto;
 }
 
 .course-grid.list-view .card-footer {
-  padding-top: 12px;
+  border-top: none;
+  padding-top: 0;
+  margin-top: auto;
 }
 
 .course-grid.list-view .course-card:hover .hover-detail {
@@ -1299,8 +1464,8 @@ function goHome() {
   width: 28px;
   height: 28px;
   border-radius: 999px;
-  border: none;
-  background: rgba(255, 255, 255, 0.9);
+  border: 1px solid rgba(0, 0, 0, 0.08);
+  background: rgba(255, 255, 255, 0.95);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -1317,7 +1482,14 @@ function goHome() {
 }
 
 .favorite-btn.active {
-  color: #ff6b00;
+  background: #ff6b00;
+  border-color: #ff6b00;
+  color: #fff;
+}
+
+.favorite-icon {
+  width: 16px;
+  height: 16px;
 }
 
 .favorite-btn :deep(.el-icon) {
@@ -1392,7 +1564,15 @@ function goHome() {
 .tag-item {
   font-size: 12px;
   color: #ff6b00;
-  background: #fff0e6;
+  background: #fff3ea;
+  padding: 2px 8px;
+  border-radius: 4px;
+}
+
+.tag-item--suit {
+  font-size: 12px;
+  color: #8c8c8c;
+  background: #eef0f4;
   padding: 2px 8px;
   border-radius: 4px;
 }
@@ -1423,6 +1603,17 @@ function goHome() {
   display: flex;
   align-items: center;
   gap: 6px;
+}
+
+.footer-item .footer-text {
+  max-width: 220px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.course-grid.list-view .footer-item .footer-text {
+  max-width: 180px;
 }
 
 .pagination-wrapper {
@@ -1691,18 +1882,183 @@ function goHome() {
 
 /* 深色模式适配 */
 .page-wrapper.is-dark {
-  background: #020617;
+  background: #1b1e27;
 }
 
 .page-wrapper.is-dark .main-header {
-  background: #020617;
-  border-bottom-color: #1e293b;
+  background: #3b3f49;
+  border-bottom-color: transparent;
+}
+
+.page-wrapper.is-dark .filter-section {
+  background: #3b3f49;
+  border-bottom-color: transparent;
+}
+
+.page-wrapper.is-dark .label {
+  color: rgba(229, 231, 235, 0.78);
+}
+
+.page-wrapper.is-dark .filter-btn {
+  background: rgba(0, 0, 0, 0.18);
+  border-color: rgba(255, 255, 255, 0.12);
+  color: rgba(229, 231, 235, 0.9);
+}
+
+.page-wrapper.is-dark .filter-btn:hover {
+  border-color: #ff6b00;
+  color: #ff6b00;
+}
+
+.page-wrapper.is-dark .filter-btn.active {
+  background: #ff6b00;
+  border-color: #ff6b00;
+  color: #fff;
+}
+
+.page-wrapper.is-dark .expand-more {
+  border-color: rgba(255, 107, 0, 0.9);
+  color: rgba(255, 107, 0, 0.95);
+}
+
+.page-wrapper.is-dark .header-search-input :deep(.el-input__wrapper) {
+  background-color: rgba(0, 0, 0, 0.12);
+  border-color: #ff6b00;
+}
+
+.page-wrapper.is-dark .header-search-input :deep(.el-input__inner) {
+  color: rgba(249, 250, 251, 0.92);
+}
+
+.page-wrapper.is-dark .header-search-input :deep(.el-input__inner::placeholder) {
+  color: rgba(229, 231, 235, 0.5);
+}
+
+.page-wrapper.is-dark .header-search-input :deep(.el-input__prefix-inner) {
+  color: rgba(229, 231, 235, 0.7);
+}
+
+.page-wrapper.is-dark .search-suggestions {
+  background: #2f3440;
+  border-color: rgba(255, 255, 255, 0.12);
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.38);
+}
+
+.page-wrapper.is-dark .suggestion-item {
+  border-bottom-color: rgba(255, 255, 255, 0.08);
+}
+
+.page-wrapper.is-dark .suggestion-item:hover {
+  background-color: rgba(255, 255, 255, 0.06);
+}
+
+.page-wrapper.is-dark .suggestion-title {
+  color: rgba(249, 250, 251, 0.92);
+}
+
+.page-wrapper.is-dark .suggestion-meta {
+  color: rgba(229, 231, 235, 0.62);
+}
+
+.page-wrapper.is-dark .suggestion-meta .separator {
+  color: rgba(255, 255, 255, 0.2);
+}
+
+.page-wrapper.is-dark .content-section {
+  background-color: #1b1e27;
+}
+
+.page-wrapper.is-dark .section-title {
+  color: rgba(249, 250, 251, 0.92);
+}
+
+.page-wrapper.is-dark .total-count {
+  color: rgba(229, 231, 235, 0.52);
+}
+
+.page-wrapper.is-dark .view-toggle {
+  background: rgba(0, 0, 0, 0.18);
+}
+
+.page-wrapper.is-dark .toggle-icon {
+  color: rgba(229, 231, 235, 0.6);
+}
+
+.page-wrapper.is-dark .toggle-icon.active {
+  background: rgba(255, 255, 255, 0.08);
+  color: rgba(249, 250, 251, 0.92);
 }
 
 .page-wrapper.is-dark .course-card {
-  background: #020617;
-  border-color: #1e293b;
-  color: #e5e7eb;
+  background: #3b3f49;
+  border-color: rgba(255, 255, 255, 0.12);
+  color: rgba(229, 231, 235, 0.9);
+}
+
+.page-wrapper.is-dark .course-card:hover {
+  background: #444956;
+  border-color: rgba(255, 255, 255, 0.16);
+  box-shadow: 0 16px 32px rgba(0, 0, 0, 0.32);
+}
+
+.page-wrapper.is-dark .hover-detail {
+  background: #444956;
+  border-top-color: rgba(255, 255, 255, 0.12);
+  box-shadow: 0 -10px 20px rgba(0, 0, 0, 0.28);
+}
+
+.page-wrapper.is-dark .course-grid.list-view .course-card {
+  border-color: rgba(255, 255, 255, 0.12);
+}
+
+.page-wrapper.is-dark .course-grid.list-view .hover-detail {
+  background: #444956;
+  border-left-color: rgba(255, 255, 255, 0.12);
+}
+
+.page-wrapper.is-dark .hover-title {
+  color: rgba(249, 250, 251, 0.92);
+}
+
+.page-wrapper.is-dark .hover-tag {
+  background: rgba(255, 107, 0, 0.14);
+  color: #ff6b00;
+}
+
+.page-wrapper.is-dark .hover-desc {
+  color: rgba(229, 231, 235, 0.72);
+}
+
+.page-wrapper.is-dark .card-title {
+  color: rgba(249, 250, 251, 0.92);
+}
+
+.page-wrapper.is-dark .tag-item {
+  background: rgba(255, 107, 0, 0.14);
+  color: #ff6b00;
+}
+
+.page-wrapper.is-dark .card-desc {
+  color: rgba(229, 231, 235, 0.7);
+}
+
+.page-wrapper.is-dark .card-footer {
+  border-top-color: rgba(255, 255, 255, 0.1);
+  color: rgba(229, 231, 235, 0.6);
+}
+
+.page-wrapper.is-dark .favorite-btn {
+  background: rgba(0, 0, 0, 0.35);
+  color: rgba(229, 231, 235, 0.55);
+  box-shadow: 0 6px 14px rgba(0, 0, 0, 0.35);
+}
+
+.page-wrapper.is-dark .favorite-btn:hover {
+  box-shadow: 0 10px 20px rgba(0, 0, 0, 0.4);
+}
+
+.page-wrapper.is-dark .favorite-btn.active {
+  color: #ff6b00;
 }
 
 .page-wrapper.is-dark .course-title {
@@ -1717,12 +2073,41 @@ function goHome() {
   color: #9ca3af;
 }
 
-.page-wrapper.is-dark .fixed-action-panel {
-  background: #1e293b;
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+.page-wrapper.is-dark .selected-filters-row {
+  border-top-color: rgba(255, 255, 255, 0.12);
 }
 
-.page-wrapper.is-dark .action-button {
-  color: #e5e7eb;
+.page-wrapper.is-dark .filter-tag {
+  background: rgba(0, 0, 0, 0.18);
+  border-color: rgba(255, 107, 0, 0.7);
+  color: #ff6b00;
+}
+
+.page-wrapper.is-dark .filter-tag:hover {
+  background: rgba(255, 107, 0, 0.14);
+}
+
+.page-wrapper.is-dark .reset-btn {
+  background: rgba(0, 0, 0, 0.18);
+}
+
+.page-wrapper.is-dark .reset-btn:hover {
+  background: rgba(255, 77, 79, 0.12);
+}
+
+.page-wrapper.is-dark :deep(.el-pagination) {
+  --el-pagination-text-color: rgba(229, 231, 235, 0.72);
+  --el-pagination-hover-color: #ff6b00;
+}
+
+.page-wrapper.is-dark :deep(.el-pagination.is-background .el-pager li),
+.page-wrapper.is-dark :deep(.el-pagination.is-background .btn-prev),
+.page-wrapper.is-dark :deep(.el-pagination.is-background .btn-next) {
+  background: rgba(0, 0, 0, 0.18);
+  color: rgba(229, 231, 235, 0.72);
+}
+
+.page-wrapper.is-dark :deep(.el-pagination.is-background .el-pager li:not(.is-active):hover) {
+  color: #ff6b00;
 }
 </style>
