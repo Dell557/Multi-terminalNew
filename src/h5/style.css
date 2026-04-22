@@ -1,0 +1,138 @@
+/* Reset and global styles */
+:root {
+  /* Brand Colors */
+  --color-primary: #ff8f1f;
+  --color-secondary: #ffb84d;
+  --color-accent: #8da4ef;
+  --color-danger: #ff5f5f;
+  --color-warning: #ffd21e;
+  --color-danger-strong: #ff4d4f;
+  --color-orange-600: #ff6a00;
+  --color-orange-550: #ff7a00;
+  --color-orange-500: #ff9843;
+  --color-orange-400: #ffb84d;
+  --color-orange-650: #ff6600;
+  --color-red-600: #ee0a24;
+  --color-red-500: #ff4d4f;
+  --color-red-400: #ff6034;
+  --color-green-500: #07c160;
+  --color-blue-500: #4a90e2;
+  --color-blue-400: #739af8;
+  --color-orange-050: #fff3e0;
+  --color-orange-040: #fff0e6;
+  --color-orange-030: #ffecca;
+  --color-blue-050: #ebeef5;
+  --color-orange-020: #fff7f0;
+  --color-orange-015: #fff0e5;
+  --color-orange-060: #fff8f2;
+  --color-orange-070: #ffe4b5;
+  --color-orange-080: #ffead9;
+  --color-orange-090: #ffedcc;
+  --color-orange-120: #ffe0c2;
+  --color-orange-700: #ff8a00;
+  --color-blue-020: #f4f8ff;
+  --color-blue-030: #e6efff;
+  --color-blue-600: #409eff;
+  --color-blue-700: #007aff;
+  --color-red-800: #b81c22;
+  --color-warm-050: #f9fafb;
+  --color-warm-060: #f5f6f8;
+  --color-neutral-350: #dbdbdb;
+  --color-neutral-250: #cccccc;
+  --color-warning-600: #e6a23c;
+
+  /* Text Colors */
+  --text-main: #323233;
+  --text-regular: #646566;
+  --text-sub: #969799;
+  --text-placeholder: #c8c9cc;
+  --text-white: #ffffff;
+  --color-neutral-900: #333333;
+  --color-neutral-800: #555555;
+  --color-neutral-700: #666666;
+  --color-neutral-500: #999999;
+  --color-neutral-300: #dddddd;
+  --color-neutral-200: #eeeeee;
+  --color-white: #ffffff;
+
+  /* Background & Border */
+  --bg-page: #f7f8fa;
+  --bg-white: #ffffff;
+  --border-color: #ebedf0;
+  --bg-light: #f5f5f5;
+  --header-bg: var(--bg-white);
+  --header-border: var(--border-color);
+  --search-bg: var(--bg-white);
+  --search-border: var(--color-orange-500);
+  --search-placeholder: var(--text-sub);
+
+  /* Spacing */
+  --space-xs: 4px;
+  --space-sm: 8px;
+  --space-md: 12px;
+  --space-lg: 16px;
+
+  /* Radius */
+  --radius-sm: 4px;
+  --radius-md: 8px;
+  --radius-lg: 10px;
+  --radius-full: 999px;
+
+  /* Vant Theme Overrides */
+  --van-primary-color: var(--color-primary);
+  --van-background-2: var(--bg-page);
+}
+
+[data-theme="dark"] {
+  --bg-page: #0f1217;
+  --bg-white: #151a21;
+  --bg-light: #1b1f27;
+  --border-color: #2a2f3a;
+
+  --text-main: #e8eaed;
+  --text-regular: #cfd3da;
+  --text-sub: #a6abb3;
+  --text-placeholder: #7a808a;
+
+  --color-neutral-900: #e8eaed;
+  --color-neutral-800: #cfd3da;
+  --color-neutral-700: #a6abb3;
+  --color-neutral-500: #7a808a;
+  --color-neutral-300: #3a404c;
+  --color-neutral-200: #2a2f3a;
+
+  --color-orange-050: #3a2518;
+  --color-orange-040: #352219;
+  --color-orange-030: #3a2a17;
+  --color-orange-020: #2a2018;
+  --color-orange-015: #2a2016;
+  --color-orange-060: #2a1e18;
+  --color-orange-070: #3a2f1c;
+  --color-orange-080: #3a2b1b;
+  --color-orange-090: #3a2b1d;
+  --color-orange-120: #4a3722;
+
+  --color-blue-050: #252c3a;
+  --color-blue-020: #1c2433;
+  --color-blue-030: #2a3750;
+
+  --color-warm-050: #1b1f27;
+  --color-warm-060: #232835;
+  --header-bg: var(--bg-page);
+  --header-border: #1b1f27;
+  --search-bg: var(--bg-page);
+  --search-border: var(--color-orange-550);
+  --search-placeholder: var(--color-neutral-500);
+}
+
+body {
+  margin: 0;
+  padding: 0;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  background-color: var(--bg-page);
+  color: var(--text-main);
+  font-family: -apple-system, BlinkMacSystemFont, 'Helvetica Neue', Helvetica,
+    Segoe UI, Arial, Roboto, 'PingFang SC', 'miui', 'Hiragino Sans GB',
+    'Microsoft Yahei', sans-serif;
+}

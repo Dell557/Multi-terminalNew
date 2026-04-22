@@ -5,6 +5,7 @@ import { Search, ArrowLeft, CaretBottom, View, WarningFilled, RefreshRight } fro
 import { getRecord, searchRecords, updateRecord, getFriendlyError, isConfigured, isBitableConfigured, getBitableConfig } from '@/utils/feishu'
 import { normalizeToArray, getText, getCoverUrl, extractUrl, DEFAULT_COVER, mapKeysToEnglish } from '@/utils/data-mapping'
 import { scrollToTop, getHeroImageSrc, openInNewTab, useDarkMode } from '@/utils/ui'
+import { logger } from '@/utils/logger'
 import FixedActionPanel from '@/components/FixedActionPanel.vue'
 import logoImg from '@/images/logo.jpg'
 import teacherImg from '@/images/detail/teacher.webp'
@@ -52,9 +53,14 @@ const { appToken, tableId } = getBitableConfig()
 // 加载数据函数（可重试）
 const loadData = async () => {
   const id = route.params.id
-  console.log('🔍 Detail Page Mounted. Route ID:', id)
+  const loadStartTime = performance.now()
+  
+  logger.info('DetailView', 'Start loading detail data', { id })
 
-  if (!id) return
+  if (!id) {
+    logger.warn('DetailView', 'No ID provided in route')
+    return
+  }
 
   isLoading.value = true
   isError.value = false
@@ -65,19 +71,34 @@ const loadData = async () => {
     try {
       const controller = new AbortController()
       const t = setTimeout(() => controller.abort(), 10000)
+      const respStart = performance.now()
       const resp = await fetch(`/api/courses/${encodeURIComponent(String(id))}`, { signal: controller.signal })
+      const respDuration = performance.now() - respStart
       clearTimeout(t)
+      
+      logger.info('DetailView', 'API response', {
+        id,
+        status: resp.status,
+        duration: `${respDuration.toFixed(2)}ms`
+      })
+      
       if (resp.ok) {
         const data = await resp.json()
         if (data?.item?.fields) {
           fetchedData.value = data.item
+          logger.info('DetailView', 'Data loaded from API', {
+            id,
+            hasFields: !!data.item.fields
+          })
           if (isConfigured() && isBitableConfigured()) {
             await loadRelatedProjects()
           }
           return
         }
       }
-    } catch (e) {}
+    } catch (e) {
+      logger.error('DetailView', 'API request failed', e, { id })
+    }
 
     if (!isConfigured()) {
       isError.value = true
@@ -93,10 +114,19 @@ const loadData = async () => {
       return
     }
 
+    const feishuStart = performance.now()
     try {
+      logger.info('DetailView', 'Fetching record from Feishu', { id, appToken, tableId })
+      
       const record = await getRecord(appToken, tableId, id)
+      const feishuDuration = performance.now() - feishuStart
+      
       if (record) {
-        console.log('✅ Fetched Real Record:', record)
+        logger.info('DetailView', 'Record fetched successfully', {
+          id,
+          duration: `${feishuDuration.toFixed(2)}ms`,
+          hasFields: !!record.fields
+        })
         fetchedData.value = record
 
         // 自动增加浏览量
@@ -127,20 +157,31 @@ const loadData = async () => {
 
         await loadRelatedProjects()
       } else {
-        console.warn('⚠️ No record found for ID:', id)
+        logger.warn('DetailView', 'No record found', { id })
         isError.value = true
         errorMessage.value = '未找到该课题信息'
         errorType.value = 'not_found'
       }
     } catch (e) {
-      console.error('Failed to fetch record:', e)
+      const feishuDuration = performance.now() - feishuStart
+      logger.error('DetailView', 'Failed to fetch record from Feishu', e, {
+        id,
+        duration: `${feishuDuration.toFixed(2)}ms`
+      })
+      
       const friendlyErr = getFriendlyError(e)
       isError.value = true
       errorMessage.value = friendlyErr.friendlyMessage
       errorType.value = friendlyErr.type
     }
   } finally {
+    const totalDuration = performance.now() - loadStartTime
     isLoading.value = false
+    logger.info('DetailView', 'Data load completed', {
+      id,
+      totalDuration: `${totalDuration.toFixed(2)}ms`,
+      success: !isError.value
+    })
   }
 }
 
@@ -316,16 +357,30 @@ const relatedProjects = ref([])
 const relatedCount = computed(() => (relatedProjects.value ? relatedProjects.value.length : 0))
 
 async function loadRelatedProjects() {
+  const startTime = performance.now()
+  logger.info('DetailView', 'Start loading related projects')
+  
   try {
-    if (!fetchedData.value || !fetchedData.value.fields) return
+    if (!fetchedData.value || !fetchedData.value.fields) {
+      logger.warn('DetailView', 'No fetched data available for related projects')
+      return
+    }
+    
     const f = fetchedData.value.fields
     const englishFields = mapKeysToEnglish(f)
     const combined = { ...f, ...englishFields }
     const teacherName = getText(combined.mentor_name_cn || combined.mentor || combined.teacher)
-    if (!teacherName) return
+    
+    if (!teacherName) {
+      logger.warn('DetailView', 'No teacher name found for related projects')
+      return
+    }
 
+    logger.info('DetailView', 'Searching related projects by teacher', { teacherName })
+    
     const res = await searchRecords(appToken, tableId)
     const items = (res && res.items) || []
+    
     const list = items
       .filter(r => {
         const ef = mapKeysToEnglish(r.fields)
@@ -340,20 +395,29 @@ async function loadRelatedProjects() {
         const primaryList = normalizeToArray(c['一级学科'] || c.primary_subject)
         const secondaryList = normalizeToArray(c['二级学科'] || c.secondary_subject)
         const tags = [primaryList[0], secondaryList[0]].filter(Boolean)
-          const headImg = extractUrl(c.cover_image_test || c['头图地址测试'])
-          const coverImg = getCoverUrl(c)
-          return {
-            id: r.record_id,
-            title,
-            desc: getText(c['课题描述'] || c['课题简介'] || c['项目简介'] || c['描述'] || c.description_cn || c.description_intro),
-            tags,
-            img: headImg || coverImg || defaultHero
-          }
+        const headImg = extractUrl(c.cover_image_test || c['头图地址测试'])
+        const coverImg = getCoverUrl(c)
+        return {
+          id: r.record_id,
+          title,
+          desc: getText(c['课题描述'] || c['课题简介'] || c['项目简介'] || c['描述'] || c.description_cn || c.description_intro),
+          tags,
+          img: headImg || coverImg || defaultHero
+        }
       })
 
     relatedProjects.value = list
+    
+    const duration = performance.now() - startTime
+    logger.info('DetailView', 'Related projects loaded', {
+      count: list.length,
+      duration: `${duration.toFixed(2)}ms`
+    })
   } catch (e) {
-    console.error('加载导师其他课题失败:', e)
+    const duration = performance.now() - startTime
+    logger.error('DetailView', 'Failed to load related projects', e, {
+      duration: `${duration.toFixed(2)}ms`
+    })
   }
 }
 

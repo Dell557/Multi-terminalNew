@@ -1,0 +1,12 @@
+{
+  "mcpServers": {
+    "Figma AI Bridge": {
+      "command": "npx",
+      "args": [
+        "-y",
+        "figma-developer-mcp",
+        "--stdio"
+      ]
+    }
+  }
+}

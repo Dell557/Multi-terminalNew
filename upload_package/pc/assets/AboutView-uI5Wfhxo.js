@@ -1,0 +1,1 @@
+import{_ as t}from"./index-VsJLyXWU.js";import{O as r,a as o,o as n}from"./vue-vendor-BGoYnSNr.js";const s={};function a(l,e){return n(),r("div",null,[...e[0]||(e[0]=[o("h2",null,"About",-1),o("p",null,"关于页面。",-1)])])}const f=t(s,[["render",a]]);export{f as default};

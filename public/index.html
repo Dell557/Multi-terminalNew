@@ -1,0 +1,29 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>跳转中...</title>
+  <script>
+    // 简单的设备检测：只判断屏幕宽度
+    function detectAndRedirect() {
+      const width = window.innerWidth || document.documentElement.clientWidth || document.body.clientWidth
+      
+      // 小于 768px 跳转到 H5，否则跳转到 PC
+      if (width < 768) {
+        window.location.href = '/h5/index.html'
+      } else {
+        window.location.href = '/pc/index.html'
+      }
+    }
+    
+    // 页面加载时立即执行
+    detectAndRedirect()
+  </script>
+</head>
+<body>
+  <div style="display: flex; justify-content: center; align-items: center; height: 100vh; font-family: Arial, sans-serif;">
+    <p>正在加载...</p>
+  </div>
+</body>
+</html>

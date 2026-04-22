@@ -1,0 +1,78 @@
+# 扣子平台配置文件
+# 用于自动化部署和配置
+
+# 项目基本信息
+project:
+  name: 课程展示平台
+  description: PC+H5 课程展示系统，支持设备自动检测
+  type: education
+  visibility: public
+
+# 构建设置
+build:
+  node_version: 20
+  install_command: npm install
+  build_command: npm run build
+  output_directory: dist
+
+# 环境变量
+environment:
+  variables:
+    - key: VITE_API_TARGET
+      value: http://localhost:3002
+    - key: VITE_API_PORT
+      value: "3002"
+
+# 部署配置
+deployment:
+  # 设备检测中间件
+  middleware:
+    - name: device-detection
+      enabled: true
+      script: |
+        export default function deviceDetection(request) {
+          const ua = request.headers.get('user-agent') || ''
+          const isMobile = /Mobile|Android|iPhone|iPad/i.test(ua)
+          
+          const url = new URL(request.url)
+          
+          if (url.pathname === '/') {
+            if (isMobile) {
+              return Response.redirect(url.origin + '/h5/', 301)
+            } else {
+              return Response.redirect(url.origin + '/pc/', 301)
+            }
+          }
+          
+          return fetch(request)
+        }
+
+  # 路由规则
+  routes:
+    - path: /pc
+      target: ./dist
+      rewrite: /pc/index.html
+    
+    - path: /h5
+      target: ./wh_H5/dist
+      rewrite: /h5/index.html
+
+# 域名配置（可选）
+domain:
+  enabled: false
+  # custom_domain: yourdomain.com
+  # ssl_enabled: true
+
+# 监控配置
+monitoring:
+  analytics_enabled: true
+  error_tracking: true
+  performance_monitoring: true
+
+# 缓存配置
+cache:
+  enabled: true
+  ttl: 3600  # 缓存时间（秒）
+  static_assets:
+    - patterns: ["*.js", "*.css", "*.png", "*.jpg", "*.webp"]
+      ttl: 86400  # 静态资源缓存 24 小时

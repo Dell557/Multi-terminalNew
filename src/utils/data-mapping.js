@@ -55,12 +55,22 @@ export const truncate = (s, max) => {
 }
 
 export const extractUrl = (val) => {
+  const sanitizeUrl = (url) => {
+    if (!url) return null
+    const trimmed = String(url).trim().replace(/^`+|`+$/g, '')
+    if (!trimmed) return null
+    const isFeishuDrive = /https?:\/\/open\.feishu\.cn\/open-apis\/drive\/v1\/medias\//i.test(trimmed)
+    const hasAccessToken = /[?&](access_token|tenant_access_token)=/i.test(trimmed)
+    if (isFeishuDrive && !hasAccessToken) return null
+    return trimmed
+  }
+
   if (!val) return null
   
   // 1. 如果是字符串，直接匹配 http/https
   if (typeof val === 'string') {
     const match = val.match(/(https?:\/\/[^\s"'<>]+)/)
-    return match ? match[0] : null
+    return match ? sanitizeUrl(match[0]) : null
   }
 
   // 2. 如果是数组，递归查找第一个有效链接
@@ -80,7 +90,7 @@ export const extractUrl = (val) => {
     }
     
     // 3.2 检查常见的 URL 字段
-    return val.url || val.link || val.image_url || extractUrl(val.text)
+    return sanitizeUrl(val.url) || sanitizeUrl(val.link) || sanitizeUrl(val.image_url) || extractUrl(val.text)
   }
   
   return null
@@ -104,8 +114,8 @@ export const getCoverUrl = (fields, width = 400) => {
 
   // 1. 尝试匹配所有可能的字段名 (优先使用 poster_image_test)
   const candidates = [
-    'poster_image_test', '海报地址测试', 
-    'cover_image_test', '头图地址测试', 
+    'cover_image_test', '头图地址测试',
+    'poster_image_test', '海报地址测试',
     'image_raw', 'img', 
     'card_cover', 'card-cover', 
     'cover_image', '封面图', 

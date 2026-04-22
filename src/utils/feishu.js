@@ -1,11 +1,13 @@
 /**
  * 飞书 API 调用工具类
- * 注意：在前端直接暴露 APP_ID 和 APP_SECRET 存在极高的安全风险。
- * 生产环境请务必将此逻辑迁移到后端服务（Node.js/Python/Go等）。
+ * 注意：在前端直接暴露 APP_ID 和 APP_SECRET 存在极高安全风险。
+ * 生产环境请务必将此逻辑迁移到后端服务（Node.js/Python/Go 等）。
  * 本文件仅用于本地开发和演示。
  */
 
-// 替换为你的飞书自建应用凭证（优先读取环境变量）
+import { logger } from './logger'
+
+// 替换为自己的飞书自建应用凭证（优先读取环境变量）
 const APP_ID = import.meta.env.VITE_FEISHU_APP_ID || '';
 const APP_SECRET = import.meta.env.VITE_FEISHU_APP_SECRET || '';
 
@@ -72,17 +74,23 @@ export const getErrorMessages = () => errorMessages;
  * 获取 Tenant Access Token
  */
 async function getAccessToken() {
+  const startTime = performance.now()
+  
   if (!isConfigured()) {
     const err = new Error(errorMessages.CONFIG_MISSING);
+    logger.error('Feishu', 'Configuration missing', err)
     throw getFriendlyError(err);
   }
 
   const now = Date.now() / 1000;
   if (accessToken && now < tokenExpireTime) {
+    logger.debug('Feishu', 'Using cached access token')
     return accessToken;
   }
 
   try {
+    logger.info('Feishu', 'Requesting access token')
+    
     // 使用 vite.config.js 中配置的代理 /feishu-api 转发到 https://open.feishu.cn/open-apis
     const response = await fetch('/feishu-api/auth/v3/tenant_access_token/internal', {
       method: 'POST',
@@ -95,18 +103,31 @@ async function getAccessToken() {
       })
     });
 
+    const duration = performance.now() - startTime
     const data = await response.json();
+    
     if (data.code === 0) {
       accessToken = data.tenant_access_token;
-      tokenExpireTime = now + data.expire - 60; // 提前60秒过期
+      tokenExpireTime = now + data.expire - 60; // 提前 60 秒过期
+      logger.info('Feishu', 'Access token obtained', {
+        duration: `${duration.toFixed(2)}ms`,
+        expiresIn: data.expire
+      })
       return accessToken;
     } else {
-      console.error('获取飞书 Token 失败:', data);
+      logger.error('Feishu', 'Failed to get access token', null, {
+        code: data.code,
+        msg: data.msg,
+        duration: `${duration.toFixed(2)}ms`
+      })
       const err = new Error(data.msg || '获取令牌失败');
       throw getFriendlyError(err);
     }
   } catch (error) {
-    console.error('网络请求失败:', error);
+    const duration = performance.now() - startTime
+    logger.error('Feishu', 'Network request failed', error, {
+      duration: `${duration.toFixed(2)}ms`
+    })
     if (error.type) throw error; // 已经是友好错误
     throw getFriendlyError(error);
   }
@@ -120,19 +141,27 @@ async function getAccessToken() {
  * @param {object} conditions 查询条件
  */
 export async function searchRecords(appToken, tableId, conditions = {}) {
+  const startTime = performance.now()
+  logger.info('Feishu', 'searchRecords called', { 
+    appToken: appToken ? `${appToken.substring(0, 10)}...` : 'missing',
+    tableId: tableId || 'missing',
+    conditions 
+  })
+  
   try {
-    console.log(`[Feishu] searchRecords called with: appToken=${appToken}, tableId=${tableId}`);
     const token = await getAccessToken();
 
     let allItems = [];
     let pageToken = conditions.page_token;
     let hasMore = true;
+    let requestCount = 0;
 
     // 如果传入了 page_token，说明是手动分页，只请求一次
     const isManualPagination = !!conditions.page_token;
     const pageSize = conditions.page_size || 20; // 降低默认页大小以提高稳定性
 
     do {
+      requestCount++
       // 构建请求体
       const body = {
         view_id: conditions.view_id,
@@ -144,8 +173,9 @@ export async function searchRecords(appToken, tableId, conditions = {}) {
       };
 
       const url = `/feishu-api/bitable/v1/apps/${appToken}/tables/${tableId}/records/search`;
-      console.log(`[Feishu] Fetching: ${url}, pageToken=${pageToken}`);
+      logger.debug('Feishu', `Fetching page ${requestCount}`, { url, pageToken })
 
+      const responseStart = performance.now()
       const response = await fetch(url, {
         method: 'POST',
         headers: {
@@ -154,11 +184,16 @@ export async function searchRecords(appToken, tableId, conditions = {}) {
         },
         body: JSON.stringify(body)
       });
+      const responseDuration = performance.now() - responseStart
 
       if (!response.ok) {
-        console.error(`[Feishu] HTTP Error: ${response.status} ${response.statusText}`);
+        logger.error('Feishu', `HTTP Error: ${response.status}`, null, {
+          status: response.status,
+          statusText: response.statusText,
+          duration: `${responseDuration.toFixed(2)}ms`
+        })
         const text = await response.text();
-        console.error(`[Feishu] Response body: ${text}`);
+        logger.error('Feishu', 'Error response body', null, { body: text.substring(0, 500) })
         const err = new Error(`HTTP Error ${response.status}`);
         throw getFriendlyError(err);
       }
@@ -167,27 +202,41 @@ export async function searchRecords(appToken, tableId, conditions = {}) {
       if (data.code === 0) {
         const result = data.data;
         if (result.items) {
-          console.log(`[Feishu] Fetched ${result.items.length} items`);
+          logger.debug('Feishu', `Page ${requestCount}: fetched ${result.items.length} items`, {
+            duration: `${responseDuration.toFixed(2)}ms`
+          })
           allItems = allItems.concat(result.items);
         } else {
-          console.log(`[Feishu] No items in this page`);
+          logger.debug('Feishu', `Page ${requestCount}: no items`)
         }
 
         // 如果是手动分页，直接返回结果
         if (isManualPagination) {
+          logger.info('Feishu', 'Manual pagination, returning single page result', {
+            count: result.items?.length || 0
+          })
           return result;
         }
 
         hasMore = result.has_more;
         pageToken = result.page_token;
       } else {
-        console.error('查询多维表格失败:', data);
+        logger.error('Feishu', 'Query failed', null, {
+          code: data.code,
+          msg: data.msg
+        })
         const err = new Error(data.msg || '查询数据失败');
         throw getFriendlyError(err);
       }
     } while (hasMore);
 
-    console.log(`[Feishu] Total items fetched: ${allItems.length}`);
+    const totalDuration = performance.now() - startTime
+    logger.info('Feishu', 'searchRecords completed', {
+      totalItems: allItems.length,
+      totalPages: requestCount,
+      duration: `${totalDuration.toFixed(2)}ms`
+    })
+    
     return {
       items: allItems,
       total: allItems.length,
@@ -195,7 +244,12 @@ export async function searchRecords(appToken, tableId, conditions = {}) {
     };
 
   } catch (error) {
-    console.error('API 调用异常:', error);
+    const totalDuration = performance.now() - startTime
+    logger.error('Feishu', 'searchRecords failed', error, {
+      duration: `${totalDuration.toFixed(2)}ms`,
+      appToken,
+      tableId
+    })
     if (error.type) throw error;
     throw getFriendlyError(error);
   }

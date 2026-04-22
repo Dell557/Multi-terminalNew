@@ -15,6 +15,8 @@ import publicImg from '@/images/public.jpg'
 import { normalizeToArray, getText, getCoverUrl, extractUrl, DEFAULT_COVER, mapKeysToEnglish, truncate } from '@/utils/data-mapping'
 import { searchRecords, isConfigured, isBitableConfigured, getBitableConfig, getFriendlyError } from '@/utils/feishu'
 import { scrollToTop, useDarkMode } from '@/utils/ui'
+import { logger, trackApiRequest } from '@/utils/logger'
+import { filterVisibleCourses, isVisibleCourse } from '@/utils/visibility-filter'
 import FixedActionPanel from '@/components/FixedActionPanel.vue'
 import { useSubjectFilters } from '@/composables/useFilters'
 
@@ -229,11 +231,14 @@ watch(baseFilteredCourses, (list) => {
 
 const filteredPhotos = computed(() => {
   let result = baseFilteredCourses.value
+  
   const key = debouncedSearchText.value ? debouncedSearchText.value.trim() : ''
   if (key && fuseIndex.value) {
     const searchResult = fuseIndex.value.search(key)
     result = searchResult.map(item => item.item)
   }
+  
+  result = filterVisibleCourses(result)
   return result
 })
 
@@ -259,8 +264,9 @@ watch(searchText, (val) => {
   // Search in baseFilteredCourses to keep suggestions context-aware
   const results = fuseIndex.value.search(key)
   
-  // Take top 6 suggestions
-  searchSuggestions.value = results.slice(0, 6).map(r => r.item)
+  // Take top 6 suggestions (filter hidden courses)
+  const visibleResults = results.filter(r => isVisibleCourse(r.item))
+  searchSuggestions.value = visibleResults.slice(0, 6).map(r => r.item)
   showSuggestions.value = searchSuggestions.value.length > 0
 })
 
@@ -330,7 +336,8 @@ const handleFeishuLikeItems = (items) => {
       university: getText(f['导师院校'] || f['大学'] || f['学校'] || f['院校'] || f['university'] || f['school'] || f['导师所在/毕业院校'] || f['university_raw'] || f['organization'] || f['org_name']) || '未知大学',
       teacher: getText(f['导师姓名'] || f['导师'] || f['教师'] || f['mentor_name_cn'] || f['mentor'] || f['teacher'] || f['mentor_name'] || f['teacher_name']) || '未知导师',
       mentorType: getText(englishFields['mentor_type_cn'] || f['导师类型'] || f['导师职称'] || f['职称'] || f['mentor_title'] || f['title_job'] || f['title']) || '导师',
-      suit: getText(f['适合专业'] || f['专业要求'] || f['suitable_major'] || f['major_requirement'] || f['suit']) || ''
+      suit: getText(f['适合专业'] || f['专业要求'] || f['suitable_major'] || f['major_requirement'] || f['suit']) || '',
+      is_hidden: record.fields?.is_hidden ?? englishFields?.is_hidden ?? 0
     })
   })
   if (map.size > 0) {
@@ -355,6 +362,9 @@ const loadData = async () => {
       ? allCourses.value
       : mockPhotos
 
+  const loadStartTime = performance.now()
+  logger.info('HomeView', 'Start loading data')
+  
   isLoading.value = true
   isError.value = false
   errorMessage.value = ''
@@ -364,17 +374,34 @@ const loadData = async () => {
   try {
     const controller = new AbortController()
     const t = setTimeout(() => controller.abort(), 10000)
+    const respStart = performance.now()
     const resp = await fetch('/api/courses?limit=200', { signal: controller.signal })
+    const respDuration = performance.now() - respStart
     clearTimeout(t)
+    
+    logger.info('HomeView', 'API /api/courses response', {
+      status: resp.status,
+      duration: `${respDuration.toFixed(2)}ms`
+    })
+    
     if (resp.ok) {
       const data = await resp.json()
       if (Array.isArray(data?.items) && data.items.length) {
         handleFeishuLikeItems(data.items)
+        const totalDuration = performance.now() - loadStartTime
+        logger.info('HomeView', 'Data loaded successfully from API', {
+          count: data.items.length,
+          totalDuration: `${totalDuration.toFixed(2)}ms`
+        })
         isLoading.value = false
         return
       }
     }
-  } catch (e) {}
+  } catch (e) {
+    logger.error('HomeView', 'API request failed', e, {
+      endpoint: '/api/courses'
+    })
+  }
 
   // --- 飞书数据集成 ---
   // 1. 检查配置是否已完成
@@ -411,16 +438,24 @@ const loadData = async () => {
   // 2. 配置您的多维表格信息
   const { appToken, tableId } = getBitableConfig()
 
-  console.log('🚀 首页发起飞书 API 请求...');
+  const feishuStart = performance.now()
+  logger.info('HomeView', 'Start loading data from Feishu', { appToken, tableId })
 
   // 3. 发起请求
   // 先不限定 field_names，避免因为字段名不完全一致导致 FieldNameNotFound
   // 飞书会返回该表的所有字段，我们只读取自己关心的字段，缺失时用默认值兜底
   searchRecords(appToken, tableId)
     .then(res => {
-      console.log('✅ 首页飞书数据获取成功:', res.items);
+      const feishuDuration = performance.now() - feishuStart
+      logger.info('HomeView', 'Feishu data loaded successfully', {
+        count: res.items?.length || 0,
+        duration: `${feishuDuration.toFixed(2)}ms`
+      })
+      
       if (res.items && res.items.length > 0) {
-        console.log('🔍 第一条数据的原始字段:', res.items[0].fields);
+        logger.debug('HomeView', 'First item fields sample', {
+          sampleFields: res.items[0]?.fields
+        })
       }
 
       // A. 处理一级学科数据
@@ -500,7 +535,11 @@ const loadData = async () => {
       console.log('🔄 已更新课程列表数据:', courses);
     })
     .catch(err => {
-      console.error('❌ 首页飞书数据获取失败:', err);
+      const feishuDuration = performance.now() - feishuStart
+      logger.error('HomeView', 'Feishu data load failed', err, {
+        duration: `${feishuDuration.toFixed(2)}ms`
+      })
+      
       // 使用友好的错误消息
       const friendlyErr = getFriendlyError(err)
       showConfigHint.value = true
@@ -511,7 +550,12 @@ const loadData = async () => {
       errorType.value = ''
     })
     .finally(() => {
+      const totalDuration = performance.now() - loadStartTime
       isLoading.value = false
+      logger.info('HomeView', 'Data load completed', {
+        totalDuration: `${totalDuration.toFixed(2)}ms`,
+        finalCount: allCourses.value?.length || 0
+      })
     });
 }
 

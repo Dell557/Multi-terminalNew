@@ -6,7 +6,48 @@ import dotenv from 'dotenv'
 import mysql from 'mysql2/promise'
 
 const app = express()
+
+// 请求日志中间件
+app.use((req, res, next) => {
+  const startTime = Date.now()
+  const startMemory = process.memoryUsage()
+  
+  res.on('finish', () => {
+    const duration = Date.now() - startTime
+    const memoryUsage = process.memoryUsage()
+    const memoryDiff = {
+      heapUsed: memoryUsage.heapUsed - startMemory.heapUsed,
+      heapTotal: memoryUsage.heapTotal - startMemory.heapTotal
+    }
+    
+    const logData = {
+      timestamp: new Date().toISOString(),
+      method: req.method,
+      url: req.originalUrl,
+      status: res.statusCode,
+      duration: `${duration}ms`,
+      memoryChange: {
+        heapUsed: `${(memoryDiff.heapUsed / 1024 / 1024).toFixed(2)}MB`,
+        heapTotal: `${(memoryDiff.heapTotal / 1024 / 1024).toFixed(2)}MB`
+      },
+      ip: req.ip || req.connection.remoteAddress
+    }
+    
+    // 根据状态码选择日志级别
+    if (res.statusCode >= 500) {
+      console.error('[ERROR]', JSON.stringify(logData))
+    } else if (res.statusCode >= 400) {
+      console.warn('[WARN]', JSON.stringify(logData))
+    } else {
+      console.log('[INFO]', JSON.stringify(logData))
+    }
+  })
+  
+  next()
+})
+
 app.use(express.json())
+app.use(express.urlencoded({ extended: true }))
 
 const rootDir = path.resolve(process.cwd())
 const loadEnvFile = (name) => {
@@ -19,6 +60,7 @@ loadEnvFile('.env.local')
 
 const PORT = process.env.SERVER_PORT || 3002
 const MYSQL_FETCH_TIMEOUT_MS = Number(process.env.MYSQL_FETCH_TIMEOUT_MS || 10000)
+const FEISHU_FETCH_TIMEOUT_MS = 10000 // 飞书 API 10秒超时限制
 
 const getMysqlConfigForLog = () => {
   const envTimeout = Number(process.env.MYSQL_CONNECT_TIMEOUT || 0)
@@ -61,12 +103,12 @@ const isTimeoutOrConnError = (err) => {
   return codes.has(err?.code) || /timeout/i.test(String(err?.message || ''))
 }
 
-const withTimeout = async (promise, ms) => {
+const withTimeout = async (promise, ms, timeoutCode = 'REQUEST_TIMEOUT') => {
   let timer
   const timeoutPromise = new Promise((_, reject) => {
     timer = setTimeout(() => {
-      const err = new Error('MYSQL_TIMEOUT')
-      err.code = 'MYSQL_TIMEOUT'
+      const err = new Error(timeoutCode)
+      err.code = timeoutCode
       reject(err)
     }, ms)
   })
@@ -77,16 +119,20 @@ const withTimeout = async (promise, ms) => {
   }
 }
 
+const FEISHU_APP_ID = String(process.env.FEISHU_APP_ID || process.env.VITE_FEISHU_APP_ID || '').trim()
+const FEISHU_APP_SECRET = String(process.env.FEISHU_APP_SECRET || process.env.VITE_FEISHU_APP_SECRET || '').trim()
+const FEISHU_APP_TOKEN = String(process.env.FEISHU_APP_TOKEN || process.env.VITE_FEISHU_APP_TOKEN || '').trim()
+const FEISHU_TABLE_ID = String(process.env.FEISHU_TABLE_ID || process.env.VITE_FEISHU_TABLE_ID || '').trim()
+const FEISHU_ENABLED = Boolean(FEISHU_APP_ID && FEISHU_APP_SECRET && FEISHU_APP_TOKEN && FEISHU_TABLE_ID)
+
 async function getTenantToken() {
-  const appId = process.env.FEISHU_APP_ID || process.env.VITE_FEISHU_APP_ID
-  const appSecret = process.env.FEISHU_APP_SECRET || process.env.VITE_FEISHU_APP_SECRET
-  if (!appId || !appSecret) {
+  if (!FEISHU_APP_ID || !FEISHU_APP_SECRET) {
     throw new Error('Missing FEISHU_APP_ID/FEISHU_APP_SECRET')
   }
   const res = await fetch('https://open.feishu.cn/open-apis/auth/v3/tenant_access_token/internal', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ app_id: appId, app_secret: appSecret })
+    body: JSON.stringify({ app_id: FEISHU_APP_ID, app_secret: FEISHU_APP_SECRET })
   })
   const data = await res.json()
   if (data.code !== 0) {
@@ -96,11 +142,9 @@ async function getTenantToken() {
 }
 
 async function fetchFeishuRecords() {
-  const appToken = process.env.FEISHU_APP_TOKEN || process.env.VITE_FEISHU_APP_TOKEN
-  const tableId = process.env.FEISHU_TABLE_ID || process.env.VITE_FEISHU_TABLE_ID
-  if (!appToken || !tableId) throw new Error('Missing FEISHU_APP_TOKEN/FEISHU_TABLE_ID')
+  if (!FEISHU_APP_TOKEN || !FEISHU_TABLE_ID) throw new Error('Missing FEISHU_APP_TOKEN/FEISHU_TABLE_ID')
   const token = await getTenantToken()
-  const url = `https://open.feishu.cn/open-apis/bitable/v1/apps/${appToken}/tables/${tableId}/records/search`
+  const url = `https://open.feishu.cn/open-apis/bitable/v1/apps/${FEISHU_APP_TOKEN}/tables/${FEISHU_TABLE_ID}/records/search`
   const res = await fetch(url, {
     method: 'POST',
     headers: {
@@ -147,6 +191,7 @@ function rowToFeishuLike(row) {
   const desc = row?.course_desc || row?.description || ''
   const cover = row?.poster_url || row?.image || row?.img || ''
   const headImg = row?.banner_url || row?.cover_image_test || ''
+  const isHidden = row?.is_hidden ?? 0
 
   // 返回格式必须严格匹配前端 handleFeishuLikeItems 的提取逻辑
   return {
@@ -173,7 +218,8 @@ function rowToFeishuLike(row) {
       '头图地址测试': headImg,
       '海报地址测试': cover,
       '头图': headImg,
-      '海报': cover
+      '海报': cover,
+      'is_hidden': isHidden
     }
   }
 }
@@ -235,66 +281,209 @@ app.get('/api/routes', (_req, res) => {
 })
 
 app.get('/api/courses', async (req, res) => {
+  const startTime = Date.now()
   const limit = Math.min(Number(req.query.limit || 200), 500)
   const table = getMysqlConfigForLog().table
-  try {
-    const [rows] = await withTimeout(pool.query(`SELECT * FROM \`${table}\` LIMIT ?`, [limit]), MYSQL_FETCH_TIMEOUT_MS)
-    
-    // 打印数据供本地对比
-    if (Array.isArray(rows) && rows.length > 0) {
-      console.log('--- Remote MySQL /api/courses Data (First Item) ---')
-      console.dir(rows[0], { depth: null })
-    }
+  let feishuErr = null
+  let dataSource = 'unknown'
 
-    const items = Array.isArray(rows) ? rows.map(rowToFeishuLike) : []
-    res.json({ items })
-  } catch (err) {
-    if (err?.code === 'MYSQL_TIMEOUT' || isTimeoutOrConnError(err)) {
-      try {
-        const items = await fetchFeishuRecords()
-        return res.json({ items })
-      } catch (fallbackErr) {
-        return res.status(502).json({
-          error: 'fallback_failed',
-          mysql: getMysqlConfigForLog(),
-          mysql_error: { code: err?.code, message: String(err?.message || err) },
-          message: String(fallbackErr?.message || fallbackErr)
+  console.log('[INFO]', JSON.stringify({
+    timestamp: new Date().toISOString(),
+    endpoint: '/api/courses',
+    action: 'start',
+    limit,
+    feishuEnabled: FEISHU_ENABLED
+  }))
+
+  if (FEISHU_ENABLED) {
+    try {
+      const feishuStart = Date.now()
+      console.log('[INFO]', JSON.stringify({
+        timestamp: new Date().toISOString(),
+        endpoint: '/api/courses',
+        action: 'fetching_feishu'
+      }))
+      
+      const items = await fetchFeishuRecords()
+      const feishuDuration = Date.now() - feishuStart
+      
+      if (items && items.length > 0) {
+        dataSource = 'feishu'
+        console.log('[INFO]', JSON.stringify({
+          timestamp: new Date().toISOString(),
+          endpoint: '/api/courses',
+          action: 'success',
+          dataSource,
+          count: items.length,
+          duration: `${feishuDuration}ms`
+        }))
+        
+        const totalDuration = Date.now() - startTime
+        return res.json({ 
+          items,
+          _meta: {
+            dataSource,
+            duration: `${totalDuration}ms`,
+            count: items.length
+          }
         })
       }
+    } catch (err) {
+      feishuErr = err
+      const reason = err?.message || 'ERROR'
+      dataSource = 'feishu_failed'
+      console.warn('[WARN]', JSON.stringify({
+        timestamp: new Date().toISOString(),
+        endpoint: '/api/courses',
+        action: 'feishu_failed',
+        reason
+      }))
     }
-    res.status(500).json({ error: 'db_error', code: err?.code, message: String(err?.message || err) })
+  }
+
+  try {
+    const mysqlStart = Date.now()
+    const [rows] = await withTimeout(pool.query(`SELECT * FROM \`${table}\` LIMIT ?`, [limit]), MYSQL_FETCH_TIMEOUT_MS, 'MYSQL_TIMEOUT')
+    const mysqlDuration = Date.now() - mysqlStart
+    
+    if (Array.isArray(rows) && rows.length > 0) {
+      dataSource = feishuErr ? 'mysql_fallback' : 'mysql'
+      const items = rows.map(rowToFeishuLike)
+      
+      console.log('[INFO]', JSON.stringify({
+        timestamp: new Date().toISOString(),
+        endpoint: '/api/courses',
+        action: 'success',
+        dataSource,
+        count: items.length,
+        duration: `${mysqlDuration}ms`
+      }))
+      
+      const totalDuration = Date.now() - startTime
+      return res.json({ 
+        items,
+        _meta: {
+          dataSource,
+          duration: `${totalDuration}ms`,
+          count: items.length
+        }
+      })
+    }
+    
+    dataSource = 'mysql_empty'
+    console.log('[INFO]', JSON.stringify({
+      timestamp: new Date().toISOString(),
+      endpoint: '/api/courses',
+      action: 'success',
+      dataSource,
+      count: 0
+    }))
+    
+    res.json({ items: [] })
+  } catch (mysqlErr) {
+    dataSource = 'all_failed'
+    const totalDuration = Date.now() - startTime
+    
+    console.error('[ERROR]', JSON.stringify({
+      timestamp: new Date().toISOString(),
+      endpoint: '/api/courses',
+      action: 'failed',
+      dataSource,
+      duration: `${totalDuration}ms`,
+      feishu_error: String(feishuErr?.message || ''),
+      mysql_error: String(mysqlErr?.message || mysqlErr)
+    }))
+    
+    res.status(500).json({ 
+      error: 'all_data_sources_failed', 
+      feishu_error: String(feishuErr?.message || ''),
+      mysql_error: String(mysqlErr?.message || mysqlErr),
+      _meta: {
+        dataSource: 'failed',
+        duration: `${totalDuration}ms`
+      }
+    })
   }
 })
 
 app.get('/api/courses/:id', async (req, res) => {
   const rawId = String(req.params.id || '')
-  if (!rawId || rawId.startsWith('rec')) {
-    return res.status(400).json({ error: 'invalid_id' })
+
+  if (rawId.startsWith('rec') && FEISHU_ENABLED) {
+    try {
+      console.log(`🚀 [Server] Fetching record ${rawId} from Feishu (10s timeout)...`)
+      const token = await getTenantToken()
+      const url = `https://open.feishu.cn/open-apis/bitable/v1/apps/${FEISHU_APP_TOKEN}/tables/${FEISHU_TABLE_ID}/records/${rawId}`
+      
+      const fetchWithTimeout = async () => {
+        const resp = await fetch(url, {
+          headers: { 'Authorization': `Bearer ${token}` }
+        })
+        return await resp.json()
+      }
+
+      const data = await fetchWithTimeout()
+      if (data.code === 0 && data.data?.record) {
+        console.log('✅ [Server] Fetched record from Feishu.')
+        return res.json({ item: data.data.record })
+      }
+    } catch (err) {
+      const reason = err?.message || 'ERROR'
+      console.warn(`⚠️ [Server] Feishu Detail API failed or ${reason}, falling back to MySQL.`)
+    }
   }
 
+  // 2. 如果不是 rec 开头，或者飞书失败/超时，尝试 MySQL
   const id = /^\d+$/.test(rawId) ? Number(rawId) : rawId
   const table = getMysqlConfigForLog().table
-  const candidates = ['id', 'ID', 'topic_id', 'topicId', 'record_id']
+  const candidates = ['record_id', 'course_id', 'id', 'ID']
 
   for (const col of candidates) {
     try {
       const [rows] = await withTimeout(
         pool.query(`SELECT * FROM \`${table}\` WHERE \`${col}\` = ? LIMIT 1`, [id]),
-        MYSQL_FETCH_TIMEOUT_MS
+        MYSQL_FETCH_TIMEOUT_MS,
+        'MYSQL_TIMEOUT'
       )
       if (Array.isArray(rows) && rows.length) {
+        console.log(`✅ [Server] Fetched record from MySQL (col: ${col}).`)
         return res.json({ item: rowToFeishuLike(rows[0]) })
       }
     } catch (err) {
       if (err?.code === 'ER_BAD_FIELD_ERROR') continue
-      if (err?.code === 'MYSQL_TIMEOUT' || isTimeoutOrConnError(err)) {
-        return res.status(504).json({ error: 'mysql_timeout', mysql: getMysqlConfigForLog() })
-      }
-      return res.status(500).json({ error: 'db_error', code: err?.code, message: String(err?.message || err) })
+      console.error(`❌ [Server] MySQL Detail error for col ${col}:`, err.message)
     }
   }
 
   return res.status(404).json({ error: 'not_found' })
+})
+
+app.all('/feishu-api/*', async (req, res) => {
+  try {
+    const suffix = req.originalUrl.replace(/^\/feishu-api/, '/open-apis')
+    const url = `https://open.feishu.cn${suffix}`
+    const method = req.method
+    const headers = {}
+    const ct = req.get('Content-Type')
+    if (ct) headers['Content-Type'] = ct
+    let body
+    if (method !== 'GET' && method !== 'HEAD') {
+      if (ct && ct.includes('application/json')) {
+        body = JSON.stringify(req.body || {})
+      } else if (ct && ct.includes('application/x-www-form-urlencoded')) {
+        body = new URLSearchParams(req.body || {}).toString()
+      } else {
+        body = undefined
+      }
+    }
+    const resp = await fetch(url, { method, headers, body })
+    const text = await resp.text()
+    res.status(resp.status)
+    const respCT = resp.headers.get('content-type') || 'application/json'
+    res.type(respCT).send(text)
+  } catch (err) {
+    res.status(500).json({ error: 'feishu_proxy_error', message: String(err?.message || err) })
+  }
 })
 
 const distDir = path.join(rootDir, 'dist')

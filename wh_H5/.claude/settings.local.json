@@ -1,0 +1,22 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(npm run dev)",
+      "Bash(npx vue-tsc:*)",
+      "Bash(npm run build)",
+      "Bash(dir D: /b)",
+      "Bash(mysql -h 182.92.75.224 -u Linkous -p -e \"SELECT 1\":*)",
+      "Bash(node -e:*)",
+      "Bash(ping:*)",
+      "Bash(powershell:*)",
+      "WebFetch(domain:minimax-algeng-chat-tts.oss-cn-wulanchabu.aliyuncs.com)",
+      "Bash(telnet:*)",
+      "Bash(node:*)",
+      "Bash(python -c:*)",
+      "Bash(grep -n \"from.*vue\" *.js)",
+      "Bash(grep -o \"from [''\"\"]vue[''\"\"]\" *.js)",
+      "Bash(grep -o 'import\\(.*vue' *.js)",
+      "Bash(grep -o 'vue-vendor[^\"']*' *.js | head -20)"
+    ]
+  }
+}
