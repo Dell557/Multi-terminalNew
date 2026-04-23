@@ -1,5 +1,5 @@
 <script setup>
-import { ref, computed, onMounted, onUnmounted } from 'vue'
+import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { Search, ArrowLeft, CaretBottom, View, WarningFilled, RefreshRight } from '@element-plus/icons-vue'
 import { getRecord, searchRecords, updateRecord, getFriendlyError, isConfigured, isBitableConfigured, getBitableConfig } from '@/utils/feishu'
@@ -40,6 +40,17 @@ const stickyCardRef = ref(null)
 const { isSticky } = useSticky(() => stickyCardRef.value ? stickyCardRef.value.$el : null, { headerHeight: 80, offset: 16 })
 
 const { isDarkMode, toggleDarkMode } = useDarkMode()
+
+// 监听深色模式变化，同步更新 HTML 和 body 的类名
+watch(isDarkMode, (newVal) => {
+  if (newVal) {
+    document.documentElement.classList.add('dark')
+    document.body.classList.add('dark')
+  } else {
+    document.documentElement.classList.remove('dark')
+    document.body.classList.remove('dark')
+  }
+}, { immediate: true })
 
 
 const fetchedData = ref(null)

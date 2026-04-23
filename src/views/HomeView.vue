@@ -37,6 +37,17 @@ const favoriteIds = ref(new Set())
 
 const { isDarkMode, toggleDarkMode } = useDarkMode()
 
+// 监听深色模式变化，同步更新 HTML 和 body 的类名
+watch(isDarkMode, (newVal) => {
+  if (newVal) {
+    document.documentElement.classList.add('dark')
+    document.body.classList.add('dark')
+  } else {
+    document.documentElement.classList.remove('dark')
+    document.body.classList.remove('dark')
+  }
+}, { immediate: true })
+
 
 const router = useRouter()
 
@@ -1925,6 +1936,12 @@ function goHome() {
 
 
 /* 深色模式适配 */
+/* 全局 HTML 和 body 深色模式 */
+html.dark, body.dark {
+  background: #1b1e27;
+  color: rgba(249, 250, 251, 0.92);
+}
+
 .page-wrapper.is-dark {
   background: #1b1e27;
 }
