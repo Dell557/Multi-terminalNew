@@ -1,6 +1,6 @@
 <script setup>
 import 'element-plus/dist/locale/zh-cn.js'
-const zhCnLocal = globalThis.ElementPlusLocaleZhCn
+const zhCnLocal = undefined
 </script>
 
 <template>

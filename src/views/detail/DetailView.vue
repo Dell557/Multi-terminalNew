@@ -282,7 +282,7 @@ const item = computed(() => {
     const mentorType = route.query.mentorType || getText(combined.mentorType || combined.mentor_type_cn || combined.mentor_title || combined.title_job || combined.title)
     const primaryList = normalizeToArray(combined.primary_subject || combined.category1 || combined.level1)
     const secondaryList = normalizeToArray(combined.secondary_subject || combined.category2 || combined.level2)
-    const imgUrl = getCoverUrl(combined, 1200)
+    const imgUrl = getCoverUrl(combined)
     const headImgUrl = extractUrl(combined.cover_image_test || combined['头图地址测试'] || combined.banner_url)
     const views = combined.views || combined['浏览量'] || combined['浏览次数'] || defaults.views
 

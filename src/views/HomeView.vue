@@ -19,6 +19,7 @@ import { logger, trackApiRequest } from '@/utils/logger'
 import { filterVisibleCourses, isVisibleCourse } from '@/utils/visibility-filter'
 import FixedActionPanel from '@/components/FixedActionPanel.vue'
 import { useSubjectFilters } from '@/composables/useFilters'
+import { AssistantWindow, AssistantTrigger } from '@/components/SmartAssistant'
 
 let selectedPrimary, selectedSecondary, selectedMentorType
 const searchText = ref('')
@@ -34,6 +35,9 @@ const currentPage = ref(1)
 const pageSize = ref(12)
 const isGridView = ref(true)
 const favoriteIds = ref(new Set())
+
+// 智能助手控制
+const showAssistant = ref(false)
 
 const { isDarkMode, toggleDarkMode } = useDarkMode()
 
@@ -888,6 +892,19 @@ function goHome() {
       :top="500"
       @toggle-dark="toggleDarkMode"
       @scroll-top="scrollToTop"
+    />
+    
+    <!-- 智能助手 -->
+    <AssistantTrigger
+      :isDarkMode="isDarkMode"
+      :bottom="120"
+      @click="showAssistant = true"
+    />
+    
+    <AssistantWindow
+      v-model:visible="showAssistant"
+      :isDarkMode="isDarkMode"
+      @close="showAssistant = false"
     />
   </div>
 </template>

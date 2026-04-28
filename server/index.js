@@ -165,7 +165,7 @@ function rowToFeishuLike(row) {
   
   const id = row?.record_id || row?.course_id || row?.id || row?.ID
   const title = row?.course_name || row?.title || row?.topic_title || ''
-  const university = row?.tutor_desc || row?.university || '' 
+  const university = row?.university || row?.tutor_school || '' 
   const teacher = row?.tutor_fname || row?.teacher || row?.mentor || ''
   const mentorType = row?.tutor_type || row?.mentor_type || ''
   
