@@ -37,7 +37,12 @@ const router = useRouter()
 
 import { useSticky } from '@/utils/sticky'
 const stickyCardRef = ref(null)
-const { isSticky } = useSticky(() => stickyCardRef.value ? stickyCardRef.value.$el : null, { headerHeight: 80, offset: 16 })
+const firstSideCardRef = ref(null)
+const { isSticky, stickyTop } = useSticky(
+  () => stickyCardRef.value ? stickyCardRef.value.$el : null,
+  () => firstSideCardRef.value ? firstSideCardRef.value.$el : null,
+  { headerHeight: 80, offset: 16 }
+)
 
 const { isDarkMode, toggleDarkMode } = useDarkMode()
 
@@ -51,6 +56,12 @@ watch(isDarkMode, (newVal) => {
     document.body.classList.remove('dark')
   }
 }, { immediate: true })
+
+// 监听路由参数变化，重新加载数据并重置滚动位置
+watch(() => route.params.id, () => {
+  window.scrollTo({ top: 0, left: 0, behavior: 'smooth' })
+  loadData()
+})
 
 
 const fetchedData = ref(null)
@@ -101,9 +112,7 @@ const loadData = async () => {
             id,
             hasFields: !!data.item.fields
           })
-          if (isConfigured() && isBitableConfigured()) {
-            await loadRelatedProjects()
-          }
+          await loadRelatedProjects()
           return
         }
       }
@@ -212,55 +221,36 @@ const searchText = ref('')
 const item = computed(() => {
   const defaults = {
     id: route.params.id,
-    title:
-      route.query.title ||
-      '案例研修：宽禁带半导体功率器件设计与智能控制应用',
-    university: route.query.university || '南京大学',
-    teacher: route.query.teacher || 'J老师',
-    primary: route.query.primary || '工学',
-    secondary: route.query.secondary || '材料类',
-    desc:
-      route.query.desc ||
-      '课程围绕宽禁带半导体功率器件的物理基础、器件结构设计以及在新能源电力电子系统中的工程应用展开，以项目制方式带领学生完成从理论到仿真再到方案设计的完整闭环。',
-    refMentorName: route.query.refMentorName || 'J老师',
-    refMentorTitle: route.query.refMentorTitle || '教授',
-    projectForm:
-      route.query.projectForm ||
-      '远程1V1，支持全国学生线上参与，全年滚动开营',
-    projectPlan:
-      route.query.projectPlan ||
-      '远程科研+成果打磨（3-6个月），支持会议论文及项目申报',
-    mainMentorIntro:
-      route.query.mainMentorIntro && typeof route.query.mainMentorIntro === 'string'
-        ? route.query.mainMentorIntro.split('|')
-        : [
-            '清北、中科院等985、211高校教授、副教授担任主导师',
-            '主持多项国家重点研发计划、国家自然科学基金项目',
-            '长期指导高中生、本科生参与真实科研课题与工程项目',
-            '具备扎实的国际会议及高水平期刊发表经验'
-          ],
-    viceMentorIntro:
-      route.query.viceMentorIntro && typeof route.query.viceMentorIntro === 'string'
-        ? route.query.viceMentorIntro.split('|')
-        : [
-            '清北等双一流高校博士组成助教导师团', 
-            '熟悉目标专业的培养方案与升学路径规划',
-            '具备扎实的科研方法论与论文写作指导经验',
-            '可提供从基础补课到成果打磨的全流程陪伴' 
-          ],
-    projectFlow:
-      route.query.projectFlow && typeof route.query.projectFlow === 'string'
-        ? route.query.projectFlow.split('|')
-        : [
-            '科研基础夯实：梳理背景知识、搭建理论框架，熟悉常用仿真与数据分析工具',
-            '方向研读进阶：精读代表性论文与案例，明确细分研究选题与技术路线',
-            '课题实践推进：在导师带领下完成建模仿真、实验设计或数据分析等核心工作',
-            '成果打磨输出：完善科研报告或论文初稿，完成修改润色与展示准备'
-          ],
-    img:
-      route.query.img ||
-      'https://lh3.googleusercontent.com/aida-public/AB6AXuDVsDcyeTttES1IDZMK-vp770XwEk4W84Og2wvwuWlJ17nfm9Y0zjoWGTHGXjqmTtaXlocRxmimCOJrhVesjpx9v5Ck9f8KD8cJK8r9iSo30PxydtV1q-uy28n3xju7guBjxmBQgFaynr1i_K55urVFL7KnygeD-AjB7lpOeKK4PyzNNXk995o6kJjxRMtgWHuqQPodpKBl295CkMW95VUWBxzWoV4pJios2GH1Vp5HHKIg0OfnXzATL83xkMsgJBH2F1QCYjpfhqY',
-    views: route.query.views || 2345 // 默认浏览量
+    title: '案例研修：宽禁带半导体功率器件设计与智能控制应用',
+    university: '南京大学',
+    teacher: 'J老师',
+    primary: '工学',
+    secondary: '材料类',
+    desc: '课程围绕宽禁带半导体功率器件的物理基础、器件结构设计以及在新能源电力电子系统中的工程应用展开，以项目制方式带领学生完成从理论到仿真再到方案设计的完整闭环。',
+    refMentorName: 'J老师',
+    refMentorTitle: '教授',
+    projectForm: '远程1V1，支持全国学生线上参与，全年滚动开营',
+    projectPlan: '远程科研+成果打磨（3-6个月），支持会议论文及项目申报',
+    mainMentorIntro: [
+      '清北、中科院等985、211高校教授、副教授担任主导师',
+      '主持多项国家重点研发计划、国家自然科学基金项目',
+      '长期指导高中生、本科生参与真实科研课题与工程项目',
+      '具备扎实的国际会议及高水平期刊发表经验'
+    ],
+    viceMentorIntro: [
+      '清北等双一流高校博士组成助教导师团',
+      '熟悉目标专业的培养方案与升学路径规划',
+      '具备扎实的科研方法论与论文写作指导经验',
+      '可提供从基础补课到成果打磨的全流程陪伴'
+    ],
+    projectFlow: [
+      '科研基础夯实：梳理背景知识、搭建理论框架，熟悉常用仿真与数据分析工具',
+      '方向研读进阶：精读代表性论文与案例，明确细分研究选题与技术路线',
+      '课题实践推进：在导师带领下完成建模仿真、实验设计或数据分析等核心工作',
+      '成果打磨输出：完善科研报告或论文初稿，完成修改润色与展示准备'
+    ],
+    img: 'https://lh3.googleusercontent.com/aida-public/AB6AXuDVsDcyeTttES1IDZMK-vp770XwEk4W84Og2wvwuWlJ17nfm9Y0zjoWGTHGXjqmTtaXlocRxmimCOJrhVesjpx9v5Ck9f8KD8cJK8r9iSo30PxydtV1q-uy28n3xju7guBjxmBQgFaynr1i_K55urVFL7KnygeD-AjB7lpOeKK4PyzNNXk995o6kJjxRMtgWHuqQPodpKBl295CkMW95VUWBxzWoV4pJios2GH1Vp5HHKIg0OfnXzATL83xkMsgJBH2F1QCYjpfhqY',
+    views: 2345
   }
 
   if (!fetchedData.value || !fetchedData.value.fields) {
@@ -271,15 +261,12 @@ const item = computed(() => {
     const f = fetchedData.value.fields
     const englishFields = mapKeysToEnglish(f)
     const combined = { ...f, ...englishFields }
-    
-    // 提取各个字段
+
     const title = getText(combined.project_name_cn || combined.project_name || combined.title_raw || combined.title)
     const desc = getText(combined.description_cn || combined.description_intro || combined.project_intro || combined.description_raw || combined.summary || combined.content)
-    // 优先使用路由传递过来的 university
-    const university = route.query.university || getText(combined.university || combined['导师院校'] || combined.school || combined.college || combined.university_raw || combined.organization || combined.org_name)
+    const university = getText(combined.university || combined['导师院校'] || combined.school || combined.college || combined.university_raw || combined.organization || combined.org_name)
     const teacher = getText(combined.mentor_name_cn || combined.mentor || combined.teacher || combined.mentor_name || combined.teacher_name)
-    // 优先使用路由传递过来的 mentorType (从列表页带过来的正确显示值)，如果不存在则尝试从 fetch 数据中获取
-    const mentorType = route.query.mentorType || getText(combined.mentorType || combined.mentor_type_cn || combined.mentor_title || combined.title_job || combined.title)
+    const mentorType = getText(combined.mentorType || combined.mentor_type_cn || combined.mentor_title || combined.title_job || combined.title)
     const primaryList = normalizeToArray(combined.primary_subject || combined.category1 || combined.level1)
     const secondaryList = normalizeToArray(combined.secondary_subject || combined.category2 || combined.level2)
     const imgUrl = getCoverUrl(combined)
@@ -298,8 +285,8 @@ const item = computed(() => {
       refMentorName: teacher || defaults.refMentorName,
       refMentorTitle: mentorType || defaults.refMentorTitle,
       img: imgUrl || defaults.img,
-      headImg: headImgUrl, // 添加头图字段
-      views: views // 添加浏览量字段
+      headImg: headImgUrl,
+      views: views
     }
 
     console.log('🎨 Computed Final Item:', finalItem)
@@ -311,19 +298,6 @@ const item = computed(() => {
 })
 
 const expertise = computed(() => {
-  const q = route.query.expertise
-  if (q) {
-    try {
-      const parsed = JSON.parse(q)
-      if (Array.isArray(parsed)) return parsed
-    } catch {}
-    if (typeof q === 'string') {
-      return q
-        .split(',')
-        .map(s => s.trim())
-        .filter(Boolean)
-    }
-  }
   return [
     '宽禁带半导体功率器件物理与结构设计',
     '高效电能变换与电力电子拓扑',
@@ -366,6 +340,11 @@ const outcomes = [
 
 const relatedProjects = ref([])
 const relatedCount = computed(() => (relatedProjects.value ? relatedProjects.value.length : 0))
+const showAllRelated = ref(false)
+
+function toggleShowAllRelated() {
+  showAllRelated.value = !showAllRelated.value
+}
 
 async function loadRelatedProjects() {
   const startTime = performance.now()
@@ -380,42 +359,80 @@ async function loadRelatedProjects() {
     const f = fetchedData.value.fields
     const englishFields = mapKeysToEnglish(f)
     const combined = { ...f, ...englishFields }
-    const teacherName = getText(combined.mentor_name_cn || combined.mentor || combined.teacher)
+    
+    const teacherName = getText(combined.mentor_name_cn || combined.mentor || combined.teacher || combined['导师'] || combined['导师姓名'])
+    const teacherUniversity = getText(combined.university || combined['导师院校'] || combined.school || combined.college)
+    const teacherTitle = getText(combined.mentorType || combined.mentor_type_cn || combined.mentor_title || combined.title_job || combined['导师职称'] || combined['职称'])
     
     if (!teacherName) {
       logger.warn('DetailView', 'No teacher name found for related projects')
       return
     }
 
-    logger.info('DetailView', 'Searching related projects by teacher', { teacherName })
+    logger.info('DetailView', 'Searching related projects', { teacherName, teacherUniversity, teacherTitle })
     
-    const res = await searchRecords(appToken, tableId)
-    const items = (res && res.items) || []
+    const res = await fetch('/api/courses?limit=500')
+    const data = await res.json()
+    const items = (data && data.items) || []
     
     const list = items
       .filter(r => {
+        if (!r.fields) return false
+        
         const ef = mapKeysToEnglish(r.fields)
         const c = { ...r.fields, ...ef }
-        const name = getText(c.mentor_name_cn || c.mentor || c.teacher)
-        return name && name === teacherName && r.record_id !== fetchedData.value.record_id
+        
+        const name = getText(c.mentor_name_cn || c.mentor || c.teacher || c['导师'] || c['导师姓名'] || c.mentor_name || c.teacher_name)
+        const university = getText(c.university || c['导师院校'] || c.school || c.college || c.organization)
+        const title = getText(c.mentorType || c.mentor_type_cn || c.mentor_title || c.title_job || c['导师职称'] || c['职称'])
+        
+        const currentId = fetchedData.value.record_id || fetchedData.value.id
+        const itemId = r.record_id || r.id
+        
+        if (!name || !currentId || !itemId) return false
+        if (itemId === currentId) return false
+        
+        const nameMatch = name.includes(teacherName) || teacherName.includes(name)
+        if (!nameMatch) return false
+        
+        const hasUniversityInfo = teacherUniversity && university
+        const hasTitleInfo = teacherTitle && title
+        
+        if (hasUniversityInfo && hasTitleInfo) {
+          const universityMatch = university.includes(teacherUniversity) || teacherUniversity.includes(university)
+          const titleMatch = title.includes(teacherTitle) || teacherTitle.includes(title)
+          return universityMatch && titleMatch
+        } else if (hasUniversityInfo) {
+          const universityMatch = university.includes(teacherUniversity) || teacherUniversity.includes(university)
+          return universityMatch
+        } else if (hasTitleInfo) {
+          const titleMatch = title.includes(teacherTitle) || teacherTitle.includes(title)
+          return titleMatch
+        }
+        
+        return true
       })
       .map(r => {
         const ef = mapKeysToEnglish(r.fields)
         const c = { ...r.fields, ...ef }
-        const title = getText(c['教授课题名称'] || c['课题名称'] || c['项目名称'] || c['标题'] || c.project_name_cn || c.project_name)
-        const primaryList = normalizeToArray(c['一级学科'] || c.primary_subject)
-        const secondaryList = normalizeToArray(c['二级学科'] || c.secondary_subject)
-        const tags = [primaryList[0], secondaryList[0]].filter(Boolean)
-        const headImg = extractUrl(c.cover_image_test || c['头图地址测试'])
+        
+        const title = getText(c.title || c.project_name_cn || c.project_name || c['教授课题名称'] || c['课题名称'] || c['项目名称'] || c['标题'])
+        const primary = getText(c.primary || c['一级学科'] || c.primary_subject || c.pri_sub)
+        const secondary = getText(c.secondary || c['二级学科'] || c.secondary_subject || c.sec_sub)
+        const tags = [primary, secondary].filter(Boolean)
+        
+        const headImg = extractUrl(c.cover_image_test || c['头图地址测试'] || c.banner_url)
         const coverImg = getCoverUrl(c)
+        
         return {
-          id: r.record_id,
-          title,
-          desc: getText(c['课题描述'] || c['课题简介'] || c['项目简介'] || c['描述'] || c.description_cn || c.description_intro),
+          id: r.record_id || r.id,
+          title: title || '未命名课题',
+          desc: getText(c.desc || c.description_cn || c.description_intro || c['课题描述'] || c['课题简介'] || c['项目简介'] || c['描述']),
           tags,
           img: headImg || coverImg || defaultHero
         }
       })
+      .filter(item => item.title && item.title !== '未命名课题')
 
     relatedProjects.value = list
     
@@ -469,7 +486,7 @@ function downloadPoster() {
 
 function goToRelated(p) {
   if (!p || !p.id) return
-  router.push({ path: `/detail/${p.id}` })
+  router.push({ path: '/' })
 }
 
 function handleImageError(event) {
@@ -819,7 +836,7 @@ function handleImageError(event) {
           </div>
 
           <aside class="content-right">
-            <el-card class="side-card" shadow="never">
+            <el-card ref="firstSideCardRef" class="side-card" shadow="never">
               <template #header>
                 <div class="side-title-row">
                   <div class="side-title-left">
@@ -831,7 +848,7 @@ function handleImageError(event) {
               <div class="side-content-wrapper">
                 <div class="side-project-list">
                   <div
-                    v-for="p in relatedProjects.slice(0, 3)"
+                    v-for="p in (showAllRelated ? relatedProjects : relatedProjects.slice(0, 3))"
                     :key="p.id || p.title"
                     class="side-project-item"
                     @click="goToRelated(p)"
@@ -849,9 +866,9 @@ function handleImageError(event) {
                     </div>
                   </div>
                 </div>
-                <div class="side-card-footer" v-if="relatedCount > 3">
-                  <span class="view-more">查看更多</span>
-                  <el-icon><CaretBottom /></el-icon>
+                <div class="side-card-footer" v-if="relatedCount > 3" @click="toggleShowAllRelated">
+                  <span class="view-more">{{ showAllRelated ? '收起' : '查看更多' }}</span>
+                  <el-icon :class="{ 'rotate-180': showAllRelated }"><CaretBottom /></el-icon>
                 </div>
               </div>
             </el-card>
@@ -935,7 +952,6 @@ function handleImageError(event) {
       :downloadIcon="xiazaihaibaoIcon"
       :showDownload="true"
       :top="500"
-      @toggle-dark="toggleDarkMode"
       @scroll-top="scrollToTop"
       @download="downloadPoster"
     />
@@ -1866,9 +1882,11 @@ function handleImageError(event) {
 
 .side-card-sticky.is-fixed {
   position: fixed;
-  top: 96px;
+  top: v-bind(stickyTop + 'px');
   width: 469px;
-  z-index: 50;
+  z-index: 9999;
+  border-top: none !important;
+  box-shadow: 0 -4px 12px rgba(0, 0, 0, 0.05);
 }
 
 .side-card-sticky :deep(.el-card__body) {

@@ -3,48 +3,62 @@ import { computed, getCurrentInstance } from 'vue'
 
 const props = defineProps({
   isDarkMode: { type: Boolean, default: false },
-  qiansemoshiIcon: { type: String, default: '' },
-  shensemoshiIcon: { type: String, default: '' },
-  fanhuidingbuIcon: { type: String, default: '' },
+  qiansemoshiIcon: { type: String, required: true },
+  shensemoshiIcon: { type: String, required: true },
+  fanhuidingbuIcon: { type: String, required: true },
   downloadIcon: { type: String, default: '' },
-  showDownload: { type: Boolean, default: false },
-  top: { type: Number, default: 500 }
+  showDownload: { type: Boolean, default: true },
+  top: { type: Number, default: 400 }
 })
-const emit = defineEmits(['toggle-dark', 'scroll-top', 'download'])
-const panelStyle = computed(() => ({ top: `${props.top}px` }))
 
-// 获取 Element Plus 全局实例
+const emit = defineEmits(['scroll-top', 'download'])
+
 const { proxy } = getCurrentInstance()
 
-// 深色模式点击处理 - 显示 Element Plus Message 提示
-const handleDarkMode = () => {
-  proxy.$message({
-    message: '正在开发中。。。',
-    type: 'info',
-    duration: 3000,
-  })
+const handleToggleDark = () => {
+  if (proxy?.$message) {
+    proxy.$message({
+      message: '正在开发中。。。',
+      type: 'warning',
+      duration: 3000
+    })
+  } else {
+    alert('正在开发中。。。')
+  }
 }
 </script>
 
 <template>
-  <div class="fixed-action-panel" :class="{ 'is-dark': isDarkMode }" :style="panelStyle">
-    <div class="action-button" @click="handleDarkMode">
+  <div class="fixed-action-panel" :class="{ 'is-dark': isDarkMode }" :style="{ top: `${top}px` }">
+    <div 
+      class="action-button" 
+      @click="handleToggleDark"
+    >
       <div class="action-icon">
-        <img :src="isDarkMode ? qiansemoshiIcon : shensemoshiIcon" :alt="isDarkMode ? '浅色模式' : '深色模式'" />
+        <img :src="isDarkMode ? shensemoshiIcon : qiansemoshiIcon" alt="主题切换" />
       </div>
       <div class="action-text">{{ isDarkMode ? '浅色模式' : '深色模式' }}</div>
     </div>
-    <div v-if="showDownload" class="action-button" @click="emit('download')">
-      <div class="action-icon">
-        <img :src="downloadIcon" alt="下载海报" />
-      </div>
-      <div class="action-text">下载海报</div>
-    </div>
-    <div class="action-button" @click="emit('scroll-top')">
+    
+    <div 
+      class="action-button" 
+      @click="emit('scroll-top')"
+    >
       <div class="action-icon">
         <img :src="fanhuidingbuIcon" alt="返回顶部" />
       </div>
       <div class="action-text">返回顶部</div>
+    </div>
+    
+    <div 
+      v-if="showDownload && downloadIcon"
+      class="action-button" 
+      @click="emit('download')"
+    >
+      <div class="action-icon">
+        <img :src="downloadIcon" alt="下载海报" />
+      </div>
+      <div class="action-text">下载海报</div>
     </div>
   </div>
 </template>
@@ -61,6 +75,7 @@ const handleDarkMode = () => {
   flex-direction: column;
   gap: 24px;
   z-index: 1000;
+  transition: all 0.3s ease;
 }
 
 .fixed-action-panel.is-dark {
@@ -80,6 +95,11 @@ const handleDarkMode = () => {
   gap: 4px;
   cursor: pointer;
   color: #333;
+  transition: all 0.2s ease;
+}
+
+.action-button:hover {
+  transform: translateY(-2px);
 }
 
 .action-icon {
@@ -99,5 +119,6 @@ const handleDarkMode = () => {
 .action-text {
   font-size: 12px;
   line-height: 1;
+  white-space: nowrap;
 }
 </style>

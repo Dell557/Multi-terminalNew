@@ -19,7 +19,6 @@ import { logger, trackApiRequest } from '@/utils/logger'
 import { filterVisibleCourses, isVisibleCourse } from '@/utils/visibility-filter'
 import FixedActionPanel from '@/components/FixedActionPanel.vue'
 import { useSubjectFilters } from '@/composables/useFilters'
-import { AssistantWindow, AssistantTrigger } from '@/components/SmartAssistant'
 
 let selectedPrimary, selectedSecondary, selectedMentorType
 const searchText = ref('')
@@ -35,9 +34,6 @@ const currentPage = ref(1)
 const pageSize = ref(12)
 const isGridView = ref(true)
 const favoriteIds = ref(new Set())
-
-// 智能助手控制
-const showAssistant = ref(false)
 
 const { isDarkMode, toggleDarkMode } = useDarkMode()
 
@@ -227,7 +223,7 @@ const fuseOptions = {
     { name: 'primary', weight: 0.05 },
     { name: 'secondary', weight: 0.05 }
   ],
-  threshold: 0.4, // 0.0 requires a perfect match, 1.0 matches anything
+  threshold: 0.4,
   includeScore: true
 }
 
@@ -276,10 +272,8 @@ watch(searchText, (val) => {
     showSuggestions.value = false
     return
   }
-  // Search in baseFilteredCourses to keep suggestions context-aware
   const results = fuseIndex.value.search(key)
   
-  // Take top 6 suggestions (filter hidden courses)
   const visibleResults = results.filter(r => isVisibleCourse(r.item))
   searchSuggestions.value = visibleResults.slice(0, 6).map(r => r.item)
   showSuggestions.value = searchSuggestions.value.length > 0
@@ -370,7 +364,7 @@ const getVisibleCardTags = (item) => {
   if (item && item.secondary) tags.push({ text: item.secondary, type: 'main' })
   return tags
 }
-// 加载数据函数（可重试）
+
 const loadData = async () => {
   const fallbackCourses =
     Array.isArray(allCourses.value) && allCourses.value.length
@@ -385,7 +379,6 @@ const loadData = async () => {
   errorMessage.value = ''
   errorType.value = ''
 
-  // 优先请求后端 /api/courses（MySQL 有则用；超时则由服务器自动回退飞书）
   try {
     const controller = new AbortController()
     const t = setTimeout(() => controller.abort(), 10000)
@@ -418,8 +411,6 @@ const loadData = async () => {
     })
   }
 
-  // --- 飞书数据集成 ---
-  // 1. 检查配置是否已完成
   if (!isConfigured()) {
     console.warn('⚠️ 飞书 API 未配置：请通过 .env.local 配置 VITE_FEISHU_APP_ID / VITE_FEISHU_APP_SECRET');
     showConfigHint.value = true
@@ -450,15 +441,11 @@ const loadData = async () => {
   showConfigHint.value = false
   configHintMessage.value = ''
 
-  // 2. 配置您的多维表格信息
   const { appToken, tableId } = getBitableConfig()
 
   const feishuStart = performance.now()
   logger.info('HomeView', 'Start loading data from Feishu', { appToken, tableId })
 
-  // 3. 发起请求
-  // 先不限定 field_names，避免因为字段名不完全一致导致 FieldNameNotFound
-  // 飞书会返回该表的所有字段，我们只读取自己关心的字段，缺失时用默认值兜底
   searchRecords(appToken, tableId)
     .then(res => {
       const feishuDuration = performance.now() - feishuStart
@@ -473,10 +460,7 @@ const loadData = async () => {
         })
       }
 
-      // A. 处理一级学科数据
       const map = new Map();
-
-      // B. 处理课程列表数据
       const courses = [];
       const items = (res && res.items) || [];
 
@@ -489,17 +473,10 @@ const loadData = async () => {
 
       items.forEach((record, index) => {
         const f = record.fields;
-
-        // 生成英文键的原始数据副本
         const englishFields = mapKeysToEnglish(f);
-
-        // 这里的 f 和 englishFields 混合在一起传给 getCoverUrl，确保能找到所有可能的字段
         let imgUrl = getCoverUrl({ ...f, ...englishFields })
-
-        // 显式提取头图和海报的 URL
         const headImg = extractUrl(f['头图地址测试'])
         const posterImg = extractUrl(f['海报地址测试'])
-
         const primaryList = normalizeToArray(f['一级学科'])
         const secondaryList = normalizeToArray(f['二级学科'])
 
@@ -516,13 +493,13 @@ const loadData = async () => {
         const secondaryValue = secondaryList[0] || '其他'
 
         courses.push({
-          ...englishFields, // 使用英文键的原始数据
+          ...englishFields,
           id: record.record_id,
           title: getText(f['教授课题名称'] || f['课题名称'] || f['项目名称'] || f['标题']) || '未命名课题',
           desc: getText(f['课题描述'] || f['课题简介'] || f['项目简介'] || f['描述']) || '暂无简介',
           img: imgUrl,
-          headImg: headImg, // 专门存放"头图地址测试"提取出的 URL
-          posterImg: posterImg, // 专门存放"海报地址测试"提取出的 URL
+          headImg: headImg,
+          posterImg: posterImg,
           primary: primaryValue,
           secondary: secondaryValue,
           university: getText(f['导师院校'] || f['大学'] || f['学校'] || f['院校'] || f['university'] || f['school'] || f['导师所在/毕业院校'] || f['university_raw']) || '未知大学',
@@ -532,7 +509,6 @@ const loadData = async () => {
         });
       });
 
-      // 更新学科筛选器
       if (map.size > 0) {
         const newData = [];
         for (const [name, childrenSet] of map) {
@@ -545,7 +521,6 @@ const loadData = async () => {
         console.log('🔄 已更新学科分类数据:', newData);
       }
 
-      // 更新课程列表
       allCourses.value = courses;
       console.log('🔄 已更新课程列表数据:', courses);
     })
@@ -555,7 +530,6 @@ const loadData = async () => {
         duration: `${feishuDuration.toFixed(2)}ms`
       })
       
-      // 使用友好的错误消息
       const friendlyErr = getFriendlyError(err)
       showConfigHint.value = true
       configHintMessage.value = `飞书数据获取失败（${friendlyErr.friendlyMessage}），已展示本地示例数据。`
@@ -574,7 +548,6 @@ const loadData = async () => {
     });
 }
 
-// 重试加载
 const handleRetry = () => {
   loadData()
 }
@@ -583,7 +556,6 @@ onMounted(() => {
   loadData()
 })
 
-// 清理定时器避免内存泄漏
 onUnmounted(() => {
   if (searchDebounceTimer) {
     clearTimeout(searchDebounceTimer)
@@ -608,7 +580,6 @@ watch(favoriteIds, (set) => {
   } catch {}
 })
 
- 
 
 const resetAllFilters = () => {
   selectedPrimary.value = ''
@@ -617,11 +588,11 @@ const resetAllFilters = () => {
   searchText.value = ''
 }
 
- 
+
 function performSearch() {
   if (searchDebounceTimer) clearTimeout(searchDebounceTimer)
   debouncedSearchText.value = searchText.value
-  showSuggestions.value = false // Hide suggestions on explicit search
+  showSuggestions.value = false
   window.scrollTo({ top: 0, behavior: 'smooth' })
 }
 
@@ -810,7 +781,6 @@ function goHome() {
 		>
 		  <div class="course-card" v-for="item in paginatedPhotos" :key="item.id" @click="onPhotoClick(item)">
 			<div class="card-cover">
-			  <!-- 优先显示 poster_image_test，其次是通用 img 字段 -->
 			  <el-image 
 			    :src="getCoverUrl(item) || publicImg" 
 			    fit="cover" 
@@ -892,19 +862,6 @@ function goHome() {
       :top="500"
       @toggle-dark="toggleDarkMode"
       @scroll-top="scrollToTop"
-    />
-    
-    <!-- 智能助手 -->
-    <AssistantTrigger
-      :isDarkMode="isDarkMode"
-      :bottom="120"
-      @click="showAssistant = true"
-    />
-    
-    <AssistantWindow
-      v-model:visible="showAssistant"
-      :isDarkMode="isDarkMode"
-      @close="showAssistant = false"
     />
   </div>
 </template>
@@ -1038,8 +995,8 @@ function goHome() {
   border: 1px solid #ff6b00;
   background-color: #fff;
   box-shadow: none;
-  padding: 0 0 0 20px; /* Left padding for text */
-  overflow: hidden; /* Ensure child elements don't overflow rounded corners */
+  padding: 0 0 0 20px;
+  overflow: hidden;
 }
 
 .header-search-input :deep(.el-input__inner) {
@@ -1050,7 +1007,7 @@ function goHome() {
 
 .header-search-input :deep(.el-input__suffix) {
   padding: 0;
-  right: 0; /* Force suffix to the right edge if absolutely positioned */
+  right: 0;
 }
 
 .header-search-input :deep(.el-input__suffix-inner) {
@@ -1084,7 +1041,7 @@ function goHome() {
 
 .header-search-btn {
   height: 100%;
-  border-radius: 0 !important; /* Let the wrapper clip the corners */
+  border-radius: 0 !important;
   margin: 0 !important;
   border: none !important;
   background-color: #ff6b00 !important;
@@ -1100,7 +1057,6 @@ function goHome() {
   background-color: #ff8533 !important;
 }
 
-/* Filter Styles */
 .filter-section {
   background: #fff;
   border-bottom: 1px solid #f0f0f0;
@@ -1167,7 +1123,6 @@ function goHome() {
   max-height: 2000px;
 }
 
-/* 统一三个“全部”按钮激活样式为橙色填充 */
 .filter-btn.all-btn.active {
   background: #ff6b00;
   color: #fff;
@@ -1195,7 +1150,6 @@ function goHome() {
   transform: rotate(180deg);
 }
 
-/* Content Section */
 .content-section {
   flex: 1;
   background-color: #f7f8fa;
@@ -1256,7 +1210,6 @@ function goHome() {
   color: #333;
 }
 
-/* Course Card */
 .course-grid {
   display: grid;
   grid-template-columns: repeat(4, 1fr);
@@ -1356,7 +1309,6 @@ function goHome() {
   transform: scale(1.05);
 }
 
-/* List View */
 .course-grid.list-view {
   grid-template-columns: repeat(2, 1fr);
   gap: 20px;
@@ -1698,7 +1650,6 @@ function goHome() {
   background-color: #ff6b00;
 }
 
-/* 已选条件行样式 */
 .selected-filters-row {
   display: flex;
   align-items: center;
@@ -1949,7 +1900,6 @@ function goHome() {
     margin: 12px 0 0;
   }
 }
-
 
 
 /* 深色模式适配 */

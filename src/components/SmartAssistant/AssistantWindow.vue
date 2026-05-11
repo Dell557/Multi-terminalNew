@@ -1,7 +1,8 @@
 <script setup>
-import { ref, computed, getCurrentInstance } from 'vue'
+import { ref, getCurrentInstance } from 'vue'
 import { useRouter } from 'vue-router'
 import { Close, ChatDotRound, Promotion } from '@element-plus/icons-vue'
+import { generateReply, analyzeInput } from '@/utils/smartAnalyzer'
 
 const props = defineProps({
   isDarkMode: { type: Boolean, default: false },
@@ -18,7 +19,7 @@ const messages = ref([
   {
     id: 1,
     type: 'assistant',
-    content: '你好！我是课程小助手 🤖\n\n我可以帮你：\n• 推荐适合的课程\n• 解答课程相关问题\n• 提供专业选择建议\n\n请问有什么可以帮你的吗？',
+    content: '你好！我是课程小助手 \n\n我可以帮你：\n• 推荐适合的课程\n• 解答课程相关问题\n• 提供专业选择建议\n\n请问有什么可以帮你的吗？',
     timestamp: new Date()
   }
 ])
@@ -61,11 +62,11 @@ const handleSend = () => {
   inputValue.value = ''
   scrollToBottom()
 
-  // 模拟助手回复（后续替换为真实 AI）
+  // 使用智能分析模块生成回复
   handleAssistantReply(content)
 }
 
-// 处理助手回复（简单规则匹配）
+// 处理助手回复（使用智能分析）
 const handleAssistantReply = (userMessage) => {
   isTyping.value = true
   
@@ -81,36 +82,7 @@ const handleAssistantReply = (userMessage) => {
     
     isTyping.value = false
     scrollToBottom()
-  }, 1000)
-}
-
-// 简单的回复生成逻辑（后续可升级为 AI）
-const generateReply = (message) => {
-  const msg = message.toLowerCase()
-  
-  // 关键词匹配
-  if (msg.includes('计算机') || msg.includes('编程') || msg.includes('代码')) {
-    return '推荐你查看以下计算机相关课程：\n\n1. 人工智能驱动的医疗影像诊断系统\n2. 下一代电力电子：宽禁带半导体\n\n你可以在筛选器中选择"工学" -> "计算机类"来查看更多课程~'
-  }
-  
-  if (msg.includes('医学') || msg.includes('生物')) {
-    return '医学和生物类课程推荐：\n\n• 全球气候变化下的城市生态韧性评估\n• 高性能锂离子电池正极材料研究\n\n建议查看"医学"或"理学"分类下的课程哦~'
-  }
-  
-  if (msg.includes('推荐') || msg.includes('适合')) {
-    return '很高兴为你推荐课程！\n\n请告诉我：\n1. 你的专业或兴趣方向\n2. 你目前的年级（高中/本科/研究生）\n3. 未来发展规划（考研/就业/科研）\n\n这样我能给你更精准的推荐~'
-  }
-  
-  if (msg.includes('你好') || msg.includes('hi') || msg.includes('hello')) {
-    return '你好呀！👋 很高兴见到你~\n\n我可以帮你推荐课程、解答疑问，或者陪你聊聊专业选择。有什么想了解的都可以问我哦！'
-  }
-  
-  if (msg.includes('谢谢') || msg.includes('感谢')) {
-    return '不客气！😊 如果还有其他问题，随时可以问我哦~\n\n祝你学习愉快！'
-  }
-  
-  // 默认回复
-  return '感谢你的提问！🤔\n\n我目前还在学习阶段，可能无法完全理解你的问题。\n\n建议你：\n1. 使用页面顶部的搜索框查找课程\n2. 通过学科分类筛选器浏览课程\n3. 联系课程顾问获取专业建议\n\n我会不断学习的，争取早日为你提供更好的帮助！'
+  }, 800)
 }
 
 // 处理键盘回车

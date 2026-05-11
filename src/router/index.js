@@ -27,6 +27,9 @@ const router = createRouter({
     if (savedPosition) {
       return savedPosition
     }
+    if (to.name === from.name && to.path !== from.path) {
+      return { left: window.scrollX, top: window.scrollY }
+    }
     return { left: 0, top: 0 }
   },
 })
